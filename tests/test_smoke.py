@@ -39,7 +39,7 @@ def test_cli_help_exits_clean() -> None:
     assert exc.value.code == 0
 
 
-def test_cli_simulate_prints_stub(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_simulate_prints_total_latency(capsys: pytest.CaptureFixture[str]) -> None:
     from autoverse.cli import main
 
     rc = main(["simulate", "--model", "llama1b", "--mode", "decode", "--seq-len", "1024"])
@@ -48,4 +48,19 @@ def test_cli_simulate_prints_stub(capsys: pytest.CaptureFixture[str]) -> None:
     assert rc == 0
     assert "simulate" in out
     assert "llama1b" in out
-    assert "Tier 0 not yet implemented" in out
+    assert "total latency" in out
+    assert "Tier-0 roofline" in out
+
+
+def test_cli_simulate_breakdown_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    from autoverse.cli import main
+
+    rc = main(
+        ["simulate", "--model", "llama1b", "--mode", "prefill", "--seq-len", "512", "--breakdown"]
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "per-op-family breakdown" in out
+    # The top contenders should show up in the breakdown.
+    assert "mlp_down" in out or "mlp_up" in out or "attn_prefill" in out
