@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from autoverse.cost import OpTiming
+from autoverse.cost import OpTiming, estimate
 from autoverse.hardware import HardwareSpec
 from autoverse.ops import Op
 
@@ -15,8 +15,8 @@ class SimResult:
 
     Attributes:
         total_ms: End-to-end latency estimate (sum of per-op ``effective_ms``).
-        per_op: List of ``(op_name, OpTiming)`` in execution order. Useful for
-            per-op breakdown tables and timeline plots.
+        per_op: ``(op_name, OpTiming)`` pairs in execution order. Drives per-op
+            breakdown tables and timeline plots in later tiers.
     """
 
     total_ms: float
@@ -26,7 +26,14 @@ class SimResult:
 def simulate(ops: list[Op], spec: HardwareSpec) -> SimResult:
     """Simulate the workload defined by ``ops`` on ``spec``.
 
-    Tier 0 implementation: iterate ops sequentially, estimate each, sum the
-    effective times. No overlap across ops yet — that is a Tier-2 refinement.
+    Tier 0: strictly sequential — no cross-op overlap. Each op's effective time
+    is added to a running total. Inter-op overlap (kernel dispatch pipelining)
+    is a Tier-2 refinement if we have budget.
     """
-    raise NotImplementedError("Implemented at Tier 0 (Day 1). See CLAUDE.md checkpoint 1D.")
+    per_op: list[tuple[str, OpTiming]] = []
+    total_ms = 0.0
+    for op in ops:
+        timing = estimate(op, spec)
+        per_op.append((op.name, timing))
+        total_ms += timing.effective_ms
+    return SimResult(total_ms=total_ms, per_op=per_op)
