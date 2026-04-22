@@ -15,9 +15,28 @@ Autoverse takes two inputs:
 
 ## Status
 
-**Day 0 — scaffolding.** Interfaces drafted; CI green; measurement & calibration TBD.
+**Tier 0 — end-to-end skeleton.** The pipeline (op-graph → roofline → total latency)
+runs end-to-end for Llama-3.2-1B on a nominal H100-SXM spec. Numbers are **uncalibrated**;
+use them for ratios and shape, not absolute accuracy. Tier 1 (calibration against
+real H100 measurements) lands next.
 
-See [`CLAUDE.md`](./CLAUDE.md) for the per-day roadmap.
+Sample output for one-token decode at `ctx_len=1024` (nominal H100 peak):
+
+```
+[autoverse] simulate: model=llama1b mode=decode seq_len=1024
+  ops simulated: 227
+  total latency: 0.749 ms  (uncalibrated Tier-0 roofline)
+  per-op-family breakdown (effective_ms):
+    mlp_gate        0.160 ms  ( 21.4%, 16 ops)
+    mlp_up          0.160 ms  ( 21.4%, 16 ops)
+    mlp_down        0.160 ms  ( 21.4%, 16 ops)
+    lm_head         0.157 ms  ( 21.0%,  1 op)
+    q_proj          0.040 ms  (  5.4%, 16 ops)
+    out_proj        0.040 ms  (  5.4%, 16 ops)
+    ...
+```
+
+See [`CLAUDE.md`](./CLAUDE.md) for the per-day roadmap and pinned modelling decisions.
 
 ## Install
 
@@ -30,8 +49,11 @@ uv sync
 ## Run
 
 ```bash
-# (Tier 0+) Simulate Llama-1B decode — prints a per-op breakdown
+# Simulate Llama-1B decode — total latency only
 uv run python -m autoverse simulate --model llama1b --mode decode --seq-len 1024
+
+# …or with a per-op-family breakdown
+uv run python -m autoverse simulate --model llama1b --mode prefill --seq-len 1024 --breakdown
 ```
 
 Additional commands (from the Makefile):
