@@ -237,8 +237,11 @@ class AttentionDecode:
     --------------------
     ``AI = 2 * n_heads / (n_kv_heads * dtype_bytes)``.
     For Llama-1B BF16: ``AI = 2*32/(8*2) = 4 ops/byte`` vs. H100 balance
-    ~295 ops/byte ⇒ hard HBM-bound. GQA lifts AI 4× over MHA (which would give
-    0.5 ops/byte in BF16) but still nowhere near the compute roof.
+    ~295 ops/byte ⇒ hard HBM-bound. Setting ``n_kv_heads = n_heads`` recovers
+    the MHA case: ``AI = 2/ι = 1 op/byte`` in BF16. GQA (4 Q heads per KV head
+    in Llama-1B) raises AI 4× over MHA but still lands nowhere near the
+    compute roof — decode is memory-bound under any reasonable attention
+    variant on this hardware.
     """
 
     batch: int
