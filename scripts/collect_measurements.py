@@ -168,7 +168,10 @@ def _build_e2e(dtype: str, quick: bool) -> list[Op]:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--device", default="auto", choices=["auto", "cuda", "cpu", "mps"])
     p.add_argument("--dtype", default="bf16", choices=["bf16", "fp16", "fp32"])
     p.add_argument("--out", type=Path, required=True, help="JSON output path")
@@ -182,9 +185,9 @@ def main() -> int:
 
     # Import torch lazily — this script may be imported in --help on a box
     # without torch, and we want that to succeed.
-    from autoverse.measure import measure_op  # noqa: F401
-
     import torch  # type: ignore[import-not-found]
+
+    from autoverse.measure import measure_op  # noqa: F401
 
     device = args.device
     if device == "auto":

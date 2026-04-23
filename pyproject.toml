@@ -61,6 +61,12 @@ warn_unused_ignores = true
 module = "torch.*"
 ignore_missing_imports = true
 
+# scipy doesn't ship PEP 561 stubs; scipy-stubs exists but adds a non-trivial
+# install footprint for one use site (least_squares in calibrate.py).
+[[tool.mypy.overrides]]
+module = "scipy.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
