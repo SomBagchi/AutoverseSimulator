@@ -2,11 +2,16 @@
 
 Tier 0 (Day 1): pure roofline — the effective time of an op is
 ``max(flops / peak_compute, bytes / peak_bw)``, with an additive per-op launch
-overhead. No compute-memory overlap, no L2, no wave quantisation.
+overhead. The ``max`` encodes **perfect compute-memory overlap within a single
+op** — ALU and HBM run fully in parallel; the op finishes when the slower
+phase finishes. This is a lower bound on real per-op latency; reality sits
+above it because overlap is imperfect, nominal peaks are unachievable, and
+small kernels under-utilise the machine.
 
 Tier 2 (Day 3) will refine with:
   - wave quantisation for small GEMMs,
-  - a single-scalar overlap model ``max(...) + (1 - alpha) * min(...)``,
+  - a calibratable overlap model ``t = max(t_c, t_m) + (1 - alpha) * min(t_c, t_m)``
+    (alpha=1 recovers Tier 0 / perfect overlap; alpha=0 is strict serialisation),
   - an L2 hit-rate heuristic.
 
 See ``../03_autoverse_end_product.md`` §8 for the pinned modelling decisions.
