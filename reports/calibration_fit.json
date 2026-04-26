@@ -1,0 +1,220 @@
+{
+  "source": "measurements/h100_sxm/run_20260426_233235.json",
+  "provenance": {
+    "device": "cuda",
+    "gpu_name": "NVIDIA H100 80GB HBM3",
+    "torch_version": "2.11.0+cu130",
+    "timestamp_utc": "2026-04-26T23:32:51+00:00",
+    "n_warmup": 10,
+    "n_iters": 100,
+    "dtype": "bf16",
+    "quick": false
+  },
+  "fit": {
+    "fitted_peak_bf16_tflops": 1138.510186023743,
+    "fitted_hbm_gbps": 5374.848294248991,
+    "fitted_per_op_overhead_us": 17.402919492501358,
+    "mape_fit": 0.1961478019239385,
+    "mape_held_out": 0.20198508943898796,
+    "n_fit": 371,
+    "n_held_out": 159,
+    "per_op_mape_fit": {
+      "MatMul": 0.09154729044802612,
+      "AttentionDecode": 0.21095108532240328,
+      "AttentionPrefill": 0.14308171829302654,
+      "RMSNorm": 0.2245292231740327,
+      "SiLUGate": 0.07148806327054318,
+      "RoPE": 0.6531740151650367,
+      "Embedding": 0.27518969076565375,
+      "Residual": 0.5011405755926133
+    },
+    "per_op_mape_held_out": {
+      "MatMul": 0.09224351491749876,
+      "AttentionPrefill": 0.08163509068135194,
+      "RMSNorm": 0.21724171765661038,
+      "Residual": 0.48201904483286157,
+      "RoPE": 0.6547165773566022,
+      "SiLUGate": 0.11037650405355583,
+      "Embedding": 0.2595400294675696,
+      "AttentionDecode": 0.2266229004986966
+    },
+    "residual_cost": 20.79488430385338
+  },
+  "worst_fit": [
+    {
+      "name": "rope_13",
+      "op_type": "RoPE",
+      "measured_ms": 0.07635200023651123,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.7465185775750586
+    },
+    {
+      "name": "rope_15",
+      "op_type": "RoPE",
+      "measured_ms": 0.05230399966239929,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6672372136950612
+    },
+    {
+      "name": "rope_3",
+      "op_type": "RoPE",
+      "measured_ms": 0.05225599929690361,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6669315505065104
+    },
+    {
+      "name": "rope_11",
+      "op_type": "RoPE",
+      "measured_ms": 0.052239999175071716,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6668295379518702
+    },
+    {
+      "name": "rope_14",
+      "op_type": "RoPE",
+      "measured_ms": 0.05222399905323982,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6667274628890599
+    },
+    {
+      "name": "rope_10",
+      "op_type": "RoPE",
+      "measured_ms": 0.05220799893140793,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6666253252606095
+    },
+    {
+      "name": "rope_1",
+      "op_type": "RoPE",
+      "measured_ms": 0.05217599868774414,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6664208620765535
+    },
+    {
+      "name": "rope_6",
+      "op_type": "RoPE",
+      "measured_ms": 0.05209600180387497,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6659086290714545
+    },
+    {
+      "name": "rope_5",
+      "op_type": "RoPE",
+      "measured_ms": 0.052080001682043076,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6658059888551489
+    },
+    {
+      "name": "rope_7",
+      "op_type": "RoPE",
+      "measured_ms": 0.052080001682043076,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6658059888551489
+    },
+    {
+      "name": "rope_8",
+      "op_type": "RoPE",
+      "measured_ms": 0.052079999819397926,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6658059769026747
+    },
+    {
+      "name": "rope_4",
+      "op_type": "RoPE",
+      "measured_ms": 0.05204800143837929,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6656005191062235
+    },
+    {
+      "name": "rope_13",
+      "op_type": "RoPE",
+      "measured_ms": 0.05204800143837929,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6656005191062235
+    },
+    {
+      "name": "rope_0",
+      "op_type": "RoPE",
+      "measured_ms": 0.052032001316547394,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.665497689457172
+    },
+    {
+      "name": "rope_12",
+      "op_type": "RoPE",
+      "measured_ms": 0.052000001072883606,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.6652918403182756
+    },
+    {
+      "name": "rope_2",
+      "op_type": "RoPE",
+      "measured_ms": 0.05196800082921982,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.665085737668661
+    },
+    {
+      "name": "rope_9",
+      "op_type": "RoPE",
+      "measured_ms": 0.05196800082921982,
+      "predicted_ms": 0.017404824662552568,
+      "rel_err": 0.665085737668661
+    },
+    {
+      "name": "rope_repr",
+      "op_type": "RoPE",
+      "measured_ms": 0.05392000079154968,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.641064292640488
+    },
+    {
+      "name": "rope_3",
+      "op_type": "RoPE",
+      "measured_ms": 0.05344000086188316,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6378403197454903
+    },
+    {
+      "name": "rope_15",
+      "op_type": "RoPE",
+      "measured_ms": 0.053279999643564224,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6367527448495749
+    },
+    {
+      "name": "rope_11",
+      "op_type": "RoPE",
+      "measured_ms": 0.05318399891257286,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6360970588775146
+    },
+    {
+      "name": "rope_12",
+      "op_type": "RoPE",
+      "measured_ms": 0.053119998425245285,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6356586182475783
+    },
+    {
+      "name": "rope_8",
+      "op_type": "RoPE",
+      "measured_ms": 0.053088000044226646,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6354390143004629
+    },
+    {
+      "name": "rope_10",
+      "op_type": "RoPE",
+      "measured_ms": 0.0530879981815815,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6354390015094786
+    },
+    {
+      "name": "rope_9",
+      "op_type": "RoPE",
+      "measured_ms": 0.05305600166320801,
+      "predicted_ms": 0.019353813624940337,
+      "rel_err": 0.6352191454645301
+    }
+  ]
+}
