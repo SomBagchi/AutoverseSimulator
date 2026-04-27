@@ -1,15 +1,17 @@
-"""Fit :class:`HardwareSpec` parameters to real measurements (checkpoint 2C).
+"""Fit :class:`HardwareSpec` parameters to real measurements.
 
-Given a set of ``(op, measured_median_ms)`` pairs, we fit three scalars that
-the Tier-0 roofline exposes:
+Given a set of ``(op, measured_median_ms)`` pairs, we fit the parameters the
+roofline cost model exposes:
 
 - ``F`` — effective BF16 tensor-core throughput, in **TFLOPs/s**.
 - ``B`` — effective HBM bandwidth, in **GB/s**.
-- ``O`` — per-op overhead, in **microseconds**.
+- one ``O`` per op family — launch overhead, in **microseconds**.
 
-Predicted latency (Tier-0 roofline + launch overhead) for op ``i``::
+Predicted latency for op ``i`` is the same formula as in :mod:`autoverse.cost`::
 
-    p_i = max(flops_i / (F · 1e12), bytes_i / (B · 1e9)) · 1e3 + O · 1e-3      # ms
+    p_i = max(flops_i / (F · 1e12), eff_bytes_i / (B · 1e9)) · 1e3 + O_family · 1e-3      # ms
+
+with ``eff_bytes`` carrying the L2 hit-rate adjustment.
 
 We minimise log-space residuals via SciPy ``least_squares`` (Trust-Region
 Reflective, with positivity bounds). Log-space is the natural loss because
@@ -19,9 +21,18 @@ error (MAPE), not absolute ms.
 The fit/held-out split defaults to a deterministic 70/30 shuffle with a seed,
 so the report numbers are reproducible across runs.
 
+Three calibration entry points:
+
+- :func:`calibrate` — joint fit of ``(F, B, single global O)``. The bare
+  baseline; kept for ablations.
+- :func:`calibrate_per_family` — joint fit of ``(F, B, per-family O)``.
+- :func:`calibrate_two_stage` — fit F on compute-bound subset only, then
+  freeze it and fit B + per-family O on the full dataset. **The default**;
+  required to keep F in physically meaningful ranges. See
+  ``reports/01_methodology.md`` for the derivation.
+
 Calibration is **dtype-scoped**: for a BF16 baseline, we filter measurements
-to BF16 ops. Mixed-precision calibration is a Tier-2+ concern; not worth the
-per-dtype-peak fitting complexity at this tier.
+to BF16 ops. Mixed-precision calibration would need a per-dtype peak.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# --- Tier-1 inputs ---
+# --- Calibration inputs ---
 # Update MEASUREMENTS when a new sweep lands.
 MEASUREMENTS ?= measurements/h100_sxm/run_20260426_233235.json
 FIT_OUT      ?= reports/calibration_fit.json
@@ -13,9 +13,9 @@ help:
 	@echo "  lint        ruff check + mypy --strict"
 	@echo "  format      ruff format"
 	@echo "  measure     collect a fresh H100 measurement sweep (CUDA + --extra measure)"
-	@echo "  calibrate   Tier 2: fit (F, B, per-family O) on the committed JSON"
-	@echo "  validate    Tier 2: calibrate + regenerate residual plot"
-	@echo "  whatif      Tier 3: regenerate the what-if report from the calibrated fit"
+	@echo "  calibrate   fit (F, B, per-family O) on the committed measurement JSON"
+	@echo "  validate    calibrate + regenerate residual plot"
+	@echo "  whatif      regenerate the what-if report from the calibrated fit"
 	@echo "  clean       remove build / cache artifacts"
 
 install:
@@ -52,7 +52,7 @@ validate: calibrate
 whatif: $(FIT_OUT)
 	uv run python scripts/whatif.py --fit $(FIT_OUT) --out reports/03_whatif.md
 	@echo ""
-	@echo "Tier-3 artifact: reports/03_whatif.md"
+	@echo "What-if artifact: reports/03_whatif.md"
 
 $(FIT_OUT):
 	$(MAKE) calibrate

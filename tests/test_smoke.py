@@ -18,7 +18,7 @@ def test_h100_sxm_spec_shape() -> None:
     assert H100_SXM.n_sm == 132
     assert H100_SXM.hbm_gbps > 0
     assert H100_SXM.peak_bf16_tflops > 0
-    assert H100_SXM.per_op_overhead_us == 0.0  # uncalibrated at Day 0
+    assert H100_SXM.per_op_overhead_us == 0.0  # vendor-nominal default; calibration overrides
 
 
 def test_llama_1b_config_consistency() -> None:
@@ -49,7 +49,7 @@ def test_cli_simulate_prints_total_latency(capsys: pytest.CaptureFixture[str]) -
     assert "simulate" in out
     assert "llama1b" in out
     assert "total latency" in out
-    assert "Tier-0 roofline" in out
+    assert "bare roofline" in out
 
 
 def test_cli_simulate_breakdown_flag(capsys: pytest.CaptureFixture[str]) -> None:

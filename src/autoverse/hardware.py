@@ -6,7 +6,7 @@ handful of calibrated overhead parameters populated by :mod:`autoverse.calibrate
 
 All "effective" numbers are targets for calibration. The nominal peaks in the shipped
 spec constants below are starting points from vendor specsheets; real workloads rarely
-hit peak, and the calibration step (Tier 1) adjusts them to match measured behaviour.
+hit peak, and :mod:`autoverse.calibrate` adjusts them to match measured behaviour.
 """
 
 from __future__ import annotations
@@ -23,8 +23,8 @@ class HardwareSpec:
         peak_bf16_tflops: Effective BF16 tensor-core throughput in TFLOP/s.
             Calibration typically reduces this from the vendor nominal peak.
         peak_fp32_tflops: Effective FP32 (non-tensor-core) throughput in TFLOP/s.
-        n_sm: Streaming-multiprocessor count. Used for wave-quantization modeling
-            in Tier 2.
+        n_sm: Streaming-multiprocessor count. Used by the (default-off)
+            wave-quantisation heuristic on MatMul ops.
         hbm_gbps: Effective HBM bandwidth in GB/s.
         hbm_capacity_gb: HBM capacity in GB.
         l2_mb: L2 cache capacity in MB.

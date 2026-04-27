@@ -2,7 +2,8 @@
 
 These tests don't assert accuracy — just structure and that the harness runs
 end-to-end on whatever device is available (CPU/MPS on dev, CUDA in prod).
-Real calibration numbers come from running on an H100 (Day 2, checkpoint 2B).
+Real calibration numbers come from running on an H100 via
+``scripts/collect_measurements.py``.
 
 Torch is an optional dep; the whole module skips when torch is not installed.
 """

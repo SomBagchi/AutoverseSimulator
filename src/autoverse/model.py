@@ -1,11 +1,14 @@
 """Transformer configuration and op-graph construction.
 
-Day 0: :class:`TransformerConfig` dataclass + the reference ``LLAMA_1B`` constant.
-Day 1: :func:`build_op_graph` — lowers a config to a flat, execution-ordered op list.
+:class:`TransformerConfig` is the dimensional spec of a decoder-only model;
+:func:`build_op_graph` lowers a config + (mode, seq_len) into a flat,
+execution-ordered list of :class:`autoverse.ops.Op` instances ready for
+costing.
 
-At Tier 0 we only handle Llama-3.2-1B (decoder-only, GQA, SwiGLU, RoPE). The op
-graph is deliberately linearised: no control-flow ops, no autotuning hooks.
-Generalisation to other families waits until Tier 3 actually needs it.
+Currently only Llama-3.2-1B (decoder-only, GQA, SwiGLU, RoPE) is supported.
+The op graph is deliberately linearised — no control-flow ops, no
+autotuning hooks. Generalising to other transformer families is a config
+addition, not a graph rewrite.
 """
 
 from __future__ import annotations

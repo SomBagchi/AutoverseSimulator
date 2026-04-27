@@ -1,4 +1,4 @@
-"""Sweep real-hardware measurements for calibration (checkpoint 2B).
+"""Sweep real-hardware measurements for calibration.
 
 Typical use on an H100 pod:
 
@@ -10,7 +10,7 @@ Typical use on an H100 pod:
 The CPU path (``--device cpu``, add ``--quick``) runs in a few seconds locally
 for dry-run / pipeline testing.
 
-Sweep coverage (matches ``04_autoverse_implementation_plan.md`` §Day 2.2):
+Sweep coverage:
 
 - MatMul: full Cartesian product over ``M x K x N`` in {256, 1024, 2048, 4096}
   (64 shapes), bf16 (or fp32 with ``--dtype fp32``).
@@ -41,7 +41,7 @@ Output JSON schema::
         ]
     }
 
-Consumed by :mod:`autoverse.calibrate` (checkpoint 2C).
+Consumed by :mod:`autoverse.calibrate`.
 """
 
 from __future__ import annotations

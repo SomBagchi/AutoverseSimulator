@@ -1,4 +1,4 @@
-"""Generate the validation residual plot for the Tier-1 report (checkpoint 2D).
+"""Generate the validation residual plot.
 
 Reads ``reports/calibration_fit.json`` (produced by ``scripts/calibrate.py``)
 plus the source measurements and renders a log-log scatter of
@@ -49,8 +49,8 @@ def main() -> int:
                         "Must match the value the fit was produced with.")
     p.add_argument("--n-sm", type=int, default=0,
                    help="SM count for wave-quant heuristic. Default 0 (off) "
-                        "matches the published Tier-2 fit. Must match the "
-                        "value the fit was produced with.")
+                        "matches the committed fit. Must match the value the "
+                        "fit was produced with.")
     args = p.parse_args()
 
     if not args.fit.exists():
@@ -93,10 +93,10 @@ def main() -> int:
     ax.set_ylim(lo, hi)
     ax.set_xlabel("measured (ms)")
     ax.set_ylabel("predicted (ms)")
-    tier_label = "Tier-2" if overhead_by_family else "Tier-1"
+    fit_label = "Calibrated" if overhead_by_family else "Bare-roofline"
     overhead_label = "<per-family>" if overhead_by_family else f"{Ov:.1f} μs"
     ax.set_title(
-        f"{tier_label} roofline fit on {prov.get('gpu_name')}\n"
+        f"{fit_label} roofline fit on {prov.get('gpu_name')}\n"
         f"F={F:.0f} TFLOPs · B={B:.0f} GB/s · O={overhead_label} · "
         f"MAPE held-out = {mape_ho*100:.1f}%"
     )

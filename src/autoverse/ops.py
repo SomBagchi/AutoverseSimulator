@@ -7,8 +7,9 @@ uses these to produce latency estimates.
 Conventions
 -----------
 - **1 multiply + 1 add = 2 FLOPs.** Canonical for GEMM accounting.
-- **Bytes are HBM round-trips only.** No intermediate materialisation at Tier 0;
-  we model flash-style attention. L2 hit-rate effects are a Tier-2 refinement.
+- **Bytes are HBM round-trips only.** No intermediate materialisation; we
+  model flash-style attention. L2 hit-rate effects are layered on top in
+  :func:`autoverse.cost.estimate`, not baked into the byte counts here.
 - Shape shorthand: ``M = n_tokens = batch * seq_len`` for the matmul view.
 """
 
@@ -47,7 +48,7 @@ class Op(Protocol):
         ...
 
     def bytes_read(self) -> int:
-        """Bytes read from HBM (ignoring L2 hits at Tier 0)."""
+        """Bytes read from HBM (the cost model layers L2 hit-rate on top)."""
         ...
 
     def bytes_written(self) -> int:
@@ -153,7 +154,7 @@ class RoPE:
     FLOPs: ``3 * n_tokens * (n_heads + n_kv_heads) * d_head``.
 
     Bytes read:    ``n_tokens * (n_heads + n_kv_heads) * d_head * dtype_bytes``
-                   (Q and K activations; cos/sin table is tiny, ignored at Tier 0).
+                   (Q and K activations; cos/sin table is tiny, ignored).
     Bytes written: same size as bytes_read (in-place-style).
     """
 

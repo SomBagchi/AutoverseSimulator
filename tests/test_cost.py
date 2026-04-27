@@ -1,11 +1,11 @@
 """Tests for :func:`autoverse.cost.estimate`.
 
-The first block pins the Tier-0 pure-roofline semantics (``use_l2=False``):
+The first block pins the bare-roofline semantics (``use_l2=False``):
   - compute_ms = flops / peak_compute_flops_per_s
   - memory_ms  = bytes / peak_bw_bytes_per_s
   - effective_ms = max(compute_ms, memory_ms) + per_op_overhead
 
-The second block pins the Tier-2 L2 hit-rate heuristic.
+The second block pins the L2 hit-rate heuristic.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from autoverse import H100_SXM
 from autoverse.cost import estimate, l2_hit_rate, wave_quant_factor
 from autoverse.ops import AttentionDecode, Embedding, MatMul, RMSNorm
 
-# ---------- Tier-0 ablation (use_l2=False, use_wave_quant=False) ----------
+# ---------- Bare-roofline ablation (use_l2=False, use_wave_quant=False) ----------
 
 
 def test_compute_bound_gemm_uses_flops() -> None:
@@ -80,7 +80,7 @@ def test_effective_is_max_of_compute_and_memory() -> None:
         )
 
 
-# ---------- Tier-2 L2 heuristic (default behaviour) ----------
+# ---------- L2 hit-rate heuristic (default behaviour) ----------
 
 
 def test_l2_hit_rate_one_when_inputs_fit() -> None:
@@ -133,7 +133,7 @@ def test_l2_partial_hit_only_scales_input_bytes() -> None:
     assert math.isclose(warm.compute_ms, cold.compute_ms, rel_tol=1e-9)
 
 
-# ---------- Wave quantisation (Tier-2) ----------
+# ---------- Wave quantisation ----------
 
 
 def test_wave_quant_factor_one_when_tiles_divide_sm_count_evenly() -> None:

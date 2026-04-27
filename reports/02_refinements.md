@@ -1,24 +1,25 @@
-# Tier-2 Validation Report
+# Modelling refinements — what we kept, what we rejected
 
-> **Sprint day 3 (compressed into Sun Apr 26 morning).** Two refinements
-> over the Tier-1 roofline, both pinned in `03_autoverse_end_product.md` §8:
-> an L2 hit-rate heuristic and per-op-family launch overhead.
+> Detailed before/after for every modelling feature beyond the bare roofline.
+> The headline calibration story is in [`01_methodology.md`](./01_methodology.md);
+> this document is the deeper engineering log: which refinements moved MAPE,
+> which moved the fitted parameters into physical ranges, and which strictly
+> regressed.
 >
-> *Reproduce: `make validate`. Same `MEASUREMENTS = ...` JSON as Tier 1.*
+> *Reproduce: `make validate`. Each refinement has an ablation flag
+> documented at the bottom.*
 
 ## Headline
 
-|   | Tier 1 | Tier 2 (this report) | target |
+|   | bare roofline | with all refinements | target |
 |---|---|---|---|
-| **MAPE held-out** | 20.2 % | **10.1 %** | ≤ 20 % |
+| **MAPE held-out** | 20.2 % | **10.1 %** | (workable) |
 | MAPE fit          | 19.6 % | 9.6 %   | — |
 | fitted F (TFLOPs) | 1138 (1.15× vendor) | **943 (0.95× vendor)** | physical ≤ 989 |
 | fitted B (GB/s)   | 5375 (1.60× vendor) | **2286 (0.68× vendor)** | physical ≤ 3350 |
 | worst per-op MAPE | RoPE 65 % | AttentionPrefill 14 % | — |
 
-**Verdict: Tier 2 ships, ~2× under MAPE target, with both throughputs
-back in physically meaningful ranges.** Three refinements working
-together:
+**Three refinements work together:**
 
 1. **L2 hit-rate heuristic** — gets `B` back below vendor.
 2. **Per-op-family overhead** — the dominant MAPE win.
@@ -26,10 +27,10 @@ together:
    F drifts unphysically high (1172 TFLOPs in the joint single-stage
    fit) because most ops in the dataset don't constrain F.
 
-## What changed from Tier 1
+## What changed from the bare roofline
 
-Tier 1 used a global per-op overhead. Examination of the residuals
-showed two systematic biases:
+The bare-roofline baseline used a global per-op overhead. Examination of
+the residuals showed two systematic biases:
 
 1. **B inflated above vendor (5375 vs 3350)** because measurements run
    each op 100× with the same input tensors → after iter 1, inputs sit
@@ -39,7 +40,7 @@ showed two systematic biases:
    single global O cannot capture the spread between RoPE's real ~52 µs
    launch and Residual's ~12 µs.
 
-Tier 2 addresses both directly.
+Each refinement addresses one of these directly.
 
 ### Refinement 1: L2 hit-rate heuristic
 
@@ -64,7 +65,7 @@ Two design notes:
   geometry is fixed by the chip.
 
 Implementation: `autoverse.cost.l2_hit_rate` and the `use_l2` flag on
-`autoverse.cost.estimate`. Tier-0 ablation is one keyword away
+`autoverse.cost.estimate`. Bare-roofline ablation is one keyword away
 (`use_l2=False`), which keeps synthetic-recovery tests stable.
 
 ### Refinement 2: per-op-family overhead
@@ -94,7 +95,7 @@ global O *cannot* model. Per-family captures it directly.
 
 Held-out MAPE, sorted worst-first:
 
-| op family | Tier 1 | Tier 2 | improvement |
+| op family | bare roofline | with refinements | improvement |
 |---|---|---|---|
 | RoPE | 65.5 % | **1.0 %** | 66× |
 | Residual | 48.2 % | 7.9 % | 6× |
@@ -142,11 +143,11 @@ splits responsibility:**
 
 Result: F = **943 TFLOPs** (0.95× vendor), B = 2286 GB/s, MAPE 10.1 %
 held-out. We pay 0.7 percentage points of MAPE vs the joint
-single-stage fit (9.4 %) for both throughputs ending up
-physically interpretable. Worth it for Tier-3 — *"what if HBM doubled?"*
+single-stage fit (9.4 %) for both throughputs ending up physically
+interpretable. Worth it for the what-if work — *"what if HBM doubled?"*
 needs `B` to mean what it says.
 
-## Worst-fit ops (Tier 2)
+## Worst-fit ops
 
 | name | type | measured | predicted | rel err |
 |---|---|---|---|---|
@@ -156,36 +157,37 @@ needs `B` to mean what it says.
 | `rmsnorm_pre_mlp_*` | RMSNorm | 0.022 ms | 0.015 ms | ~32 % |
 | `mlp_gate_*` | MatMul | 0.025 ms | 0.017 ms | ~32 % |
 
-All Tier-2 outliers are now in the 0.01–0.03 ms range — small enough
-that a few microseconds of per-launch variation shows up as double-
-digit relative error. The corresponding *absolute* error is
-0.005–0.010 ms, contributing < 0.5 % of total inference latency even
-when summed across all 16 layers.
+All current outliers are in the 0.01–0.03 ms range — small enough that
+a few microseconds of per-launch variation shows up as double-digit
+relative error. The corresponding *absolute* error is 0.005–0.010 ms,
+contributing < 0.5 % of total inference latency even when summed across
+all 16 layers.
 
-(The Tier-1 lm_head outlier — measured 0.818 ms, predicted 0.477 ms,
-1.7× off — is now predicted at 0.595 ms with the lower physical F,
-giving 27 % rel-err. Still imperfect but no longer the worst, and the
-underlying cause — sub-peak cuBLAS efficiency on tall-skinny shapes —
-is documented in "Wave quantisation: tried, rejected" below.)
+(The bare-roofline lm_head outlier — measured 0.818 ms, predicted
+0.477 ms, 1.7× off — is now predicted at 0.595 ms with the lower
+physical F, giving 27 % rel-err. Still imperfect but no longer the
+worst, and the underlying cause — sub-peak cuBLAS efficiency on
+tall-skinny shapes — is documented in "Wave quantisation: tried,
+rejected" below.)
 
 ## Residual plot
 
-![Tier-2 residual scatter](figures/measured_vs_predicted.png)
+![Residual scatter](figures/measured_vs_predicted.png)
 
 Read the plot:
 
-- The **±30 % grey band** now contains visibly more points than the
-  Tier-1 plot — the off-band cluster of RoPE / Residual at the bottom-
-  left is gone.
-- The **diagonal trend** has tightened, especially at the medium-size
-  range where most Llama-1B ops sit.
+- The **±30 % grey band** contains visibly more points than the bare
+  roofline ever did — the off-band cluster of RoPE / Residual at the
+  bottom-left is gone, killed by per-family overhead.
+- The **diagonal trend** is tight, especially at the medium-size range
+  where most Llama-1B ops sit.
 - The **upper-right outlier** is the LM head — the only point still
   visibly off the diagonal at the high end, and a known cuBLAS
   shape-efficiency artefact (see "Worst-fit ops" above).
 
-## Tier-2 refinements: status
+## Refinement status
 
-We pinned four refinements at the start of Tier 2 in
+We considered five refinements over the bare roofline, each pinned in
 `03_autoverse_end_product.md` §8. Final status:
 
 | refinement | status | impact realised |
@@ -195,9 +197,6 @@ We pinned four refinements at the start of Tier 2 in
 | Two-stage fit (F on compute-bound; B+O on full) | **shipped, on by default** | Brings F into physical range. |
 | Wave quantisation for GEMMs | **implemented; default off — see below** | Strict regression on this dataset. |
 | Per-op-family α (overlap) | deferred | Lower priority once O is per-family. |
-
-Held-out MAPE target was ≤ 20 %. We landed at 10.1 % with both throughputs
-physically interpretable.
 
 ## Wave quantisation: tried, rejected (kept as ablation)
 
@@ -243,7 +242,7 @@ Why the regression — three observations from the data:
 real cause is sub-peak cuBLAS algorithm efficiency on tall-skinny
 shapes (the chip achieves ~67 % of vendor F on this op vs ~78 % on big
 square GEMMs). That needs a per-shape efficiency model, not wave
-quantisation — and is past the scope of this sprint.
+quantisation — and is past the scope of this work.
 
 Wave-quant code, tests, and CLI flags are kept so a future iteration
 can ablate cleanly. Re-enable for any single run via:
@@ -257,7 +256,7 @@ uv run python scripts/calibrate.py \
 ## How to reproduce
 
 ```bash
-make validate              # Tier-2 default: two-stage + L2 + per-family overhead
+make validate              # default: two-stage + L2 + per-family overhead
 # Ablations (each isolates one refinement):
 uv run python scripts/calibrate.py \
     measurements/h100_sxm/run_20260426_233235.json \
@@ -273,6 +272,6 @@ uv run python scripts/calibrate.py \
     --n-sm 132             # add wave quantisation (regresses MAPE)
 ```
 
-The committed `reports/calibration_fit.json` is the Tier-2 default
+The committed `reports/calibration_fit.json` is the default
 (two-stage + L2 + per-family overhead), with
 `fitted_overhead_by_family` populated.

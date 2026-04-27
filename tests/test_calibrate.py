@@ -49,7 +49,7 @@ def _sample_ops() -> list:
 
 
 def _synth_measure(ops: list, F: float, B: float, Ov: float) -> list[float]:
-    """Generate noise-free measurements from the Tier-0 roofline itself."""
+    """Generate noise-free measurements from the bare roofline itself."""
     return [predict_ms(op, F, B, Ov) for op in ops]
 
 
@@ -272,7 +272,7 @@ def test_calibrate_per_family_recovers_per_family_overheads() -> None:
 
 
 def test_calibrate_per_family_with_l2_runs_cleanly() -> None:
-    """Smoke test: full pipeline with both Tier-2 refinements active."""
+    """Smoke test: full pipeline with L2 + per-family overhead active."""
     ops = [MatMul(m=4096, k=4096, n=4096),
            MatMul(m=1, k=4096, n=128_256),
            RMSNorm(n_tokens=4096, d_model=4096),

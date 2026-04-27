@@ -1,12 +1,17 @@
-"""Plot + markdown report generation.
+"""Placeholder for in-package report-generation utilities.
 
-Tier 1+ (Day 2+). Produces per-op breakdown tables, roofline plots, and
-markdown stubs that populate ``reports/``.
+Currently empty: the actual reports under ``reports/`` are produced by
+``scripts/calibrate.py``, ``scripts/make_validation_plot.py``, and
+``scripts/whatif.py``. This module is reserved for any future API that
+needs to be importable from the library rather than invoked as a script.
 """
 
 from __future__ import annotations
 
 
 def report() -> None:
-    """Placeholder. Implemented at Tier 1+ (Day 2+)."""
-    raise NotImplementedError("Implemented at Tier 1 (Day 2). See CLAUDE.md checkpoint 2D.")
+    """Reserved. Use ``scripts/`` for now."""
+    raise NotImplementedError(
+        "Use scripts/calibrate.py, scripts/make_validation_plot.py, "
+        "or scripts/whatif.py — there is no in-package report API yet."
+    )

@@ -1,8 +1,8 @@
 """End-to-end tests for :func:`autoverse.simulator.simulate`.
 
-These exercise the full Tier-0 path (op graph → per-op estimates → summed
-latency) for Llama-1B on H100-SXM. Specific latency numbers are uncalibrated
-and will shift at Tier 1; what we pin here is *structure and sanity*:
+These exercise the full prediction path (op graph → per-op estimates →
+summed latency) for Llama-1B on H100-SXM. Specific latency numbers are
+uncalibrated; what we pin here is *structure and sanity*:
   - per-op breakdown has the same length as the op graph,
   - total_ms is the sum of effective_ms,
   - prefill latency scales with seq_len,

@@ -1,6 +1,6 @@
 """Per-op analytical cost model.
 
-Tier 0 (Day 1): pure roofline — the effective time of an op is
+The bare roofline: the effective time of an op is
 ``max(flops / peak_compute, bytes / peak_bw)``, with an additive per-op launch
 overhead. The ``max`` encodes **perfect compute-memory overlap within a single
 op** — ALU and HBM run fully in parallel; the op finishes when the slower
@@ -8,7 +8,7 @@ phase finishes. This is a lower bound on real per-op latency; reality sits
 above it because overlap is imperfect, nominal peaks are unachievable, and
 small kernels under-utilise the machine.
 
-Tier 2 (Day 3) refinements, **shipped**:
+Refinements shipped on top:
 
 - **L2 hit-rate heuristic.** ``hit_rate = min(1, L2_capacity / bytes_read)``,
   applied to inputs only (output writes always stream to HBM):
@@ -22,17 +22,15 @@ Tier 2 (Day 3) refinements, **shipped**:
   ``ceil(M/BM) * ceil(N/BN)`` blocks; ``N_SM`` blocks run in parallel.
   ``waves = ceil(tiles / N_SM)`` ⇒ multiplier ``waves * N_SM / tiles ≥ 1`` on
   compute time. Captures the trailing-partial-wave penalty when the tile
-  count doesn't divide ``N_SM`` evenly. Effect is small for big square GEMMs
-  but real for small ops; tile size is a heuristic constant (``BM = BN = 128``
-  for bf16 cuBLAS on H100).
+  count doesn't divide ``N_SM`` evenly. **Off by default** because it
+  strictly worsens MAPE on this dataset (per-family overhead already absorbs
+  the kernel-launch wallclock floor that wave-quant tries to model — adding
+  wave-quant double-counts). Documented in ``reports/02_refinements.md``.
 
-Tier 2 refinements deferred (low marginal value once L2 + per-family-overhead
-are in):
+Refinements considered but not implemented:
   - a calibratable overlap model ``t = max(t_c, t_m) + (1 - alpha) * min(t_c, t_m)``,
   - per-shape compute efficiency (the residual lm-head outlier needs this,
     not wave quantisation).
-
-See ``../03_autoverse_end_product.md`` §8 for the pinned modelling decisions.
 """
 
 from __future__ import annotations
@@ -76,9 +74,9 @@ class OpTiming:
 def _peak_tflops_for_dtype(spec: HardwareSpec, dtype: str) -> float:
     """Pick the relevant peak compute throughput for the op's dtype.
 
-    Tier 0 is coarse: BF16/FP16 use the BF16 tensor-core peak; FP32 uses the
-    non-tensor-core peak; other dtypes (FP8, future precisions) fall back to
-    the BF16 peak and get refined later.
+    Coarse partitioning: BF16/FP16 use the BF16 tensor-core peak; FP32 uses
+    the non-tensor-core peak; other dtypes (FP8, future precisions) fall back
+    to the BF16 peak.
     """
     if dtype in ("bf16", "fp16"):
         return spec.peak_bf16_tflops
@@ -88,7 +86,7 @@ def _peak_tflops_for_dtype(spec: HardwareSpec, dtype: str) -> float:
 
 
 def l2_hit_rate(input_bytes: int, l2_mb: float) -> float:
-    """Tier-2 heuristic: ``min(1, L2_capacity / input_bytes)``.
+    """L2 hit-rate heuristic: ``min(1, L2_capacity / input_bytes)``.
 
     Heuristic-by-design: caches reduce *re-reads*, not first-time writes. We
     therefore apply the hit rate to ``bytes_read`` only — output writes
@@ -167,8 +165,8 @@ def estimate(
     wallclock floor that wave quant is meant to model. Kept here as a
     toggleable ablation; ``use_wave_quant=True`` reproduces the worse fit.
 
-    ``use_l2=False`` recovers Tier-0 behaviour for ablations / synthetic-
-    recovery calibration tests.
+    ``use_l2=False`` ablates the L2 heuristic (used by synthetic-recovery
+    tests and the bare-roofline ablation).
     """
     peak_flops_per_s = _peak_tflops_for_dtype(spec, op.dtype) * 1e12
     peak_bytes_per_s = spec.hbm_gbps * 1e9

@@ -5,8 +5,12 @@ Usage::
     python -m autoverse simulate --model llama1b --mode decode --seq-len 1024
     python -m autoverse simulate --model llama1b --mode prefill --seq-len 1024 --breakdown
 
-At Tier 0 the output is an uncalibrated roofline estimate — useful for
-ratios and scaling, not for absolute latency. Calibration lands at Tier 1.
+The CLI uses an uncalibrated H100-vendor `HardwareSpec` by default. Output
+is the bare roofline (no L2 heuristic, no per-family overhead, no calibrated
+F/B) — useful for ratios and scaling, not for absolute latency. The
+calibrated fit lives in ``reports/calibration_fit.json`` and is consumed by
+``scripts/whatif.py``; ``simulator.simulate`` itself currently uses
+:data:`autoverse.hardware.H100_SXM` directly.
 """
 
 from __future__ import annotations
@@ -68,7 +72,7 @@ def _print_breakdown(result: SimResult) -> None:
 def _print_header(result: SimResult, model: str, mode: str, seq_len: int) -> None:
     print(f"[autoverse] simulate: model={model} mode={mode} seq_len={seq_len}")
     print(f"  ops simulated: {len(result.per_op)}")
-    print(f"  total latency: {result.total_ms:.3f} ms  (uncalibrated Tier-0 roofline)")
+    print(f"  total latency: {result.total_ms:.3f} ms  (uncalibrated bare roofline)")
 
 
 def main(argv: list[str] | None = None) -> int:

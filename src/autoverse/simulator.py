@@ -26,9 +26,9 @@ class SimResult:
 def simulate(ops: list[Op], spec: HardwareSpec) -> SimResult:
     """Simulate the workload defined by ``ops`` on ``spec``.
 
-    Tier 0: strictly sequential — no cross-op overlap. Each op's effective time
-    is added to a running total. Inter-op overlap (kernel dispatch pipelining)
-    is a Tier-2 refinement if we have budget.
+    Strictly sequential — no cross-op overlap. Each op's effective time is
+    added to a running total. Inter-op overlap (kernel dispatch pipelining)
+    is a future refinement.
     """
     per_op: list[tuple[str, OpTiming]] = []
     total_ms = 0.0

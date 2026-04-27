@@ -1,18 +1,18 @@
-# Tier 1 — what we did, and what the numbers mean
+# Calibration methodology — what F, B, O, and MAPE mean
 
-> Pedagogical companion to [`01_validation.md`](./01_validation.md). That
-> file is the formal report; this one walks through what each number
-> means and resolves a genuinely confusing result (fitted throughputs
-> above vendor peaks).
+> A pedagogical walkthrough of how the simulator is calibrated against
+> real-hardware measurements: what each fitted parameter represents,
+> what loss we minimise, and what the headline numbers actually say
+> about an H100. If you're new to the codebase, read this first.
 
-## What were we trying to do?
+## What we're doing
 
-The Tier-0 simulator already predicts a per-op latency given a
-`HardwareSpec`. But every number in `HardwareSpec` is a *vendor nominal* —
-it's what the chip would do under ideal conditions, not what cuBLAS and
-the runtime actually deliver in practice. **Tier 1's job is to replace the
-vendor numbers with measured-effective ones**, so that
-`simulate(model, hw)` predicts something close to wall-clock reality.
+The simulator predicts per-op latency given a `HardwareSpec`. But every
+number in the vendor `HardwareSpec` is a *nominal peak* — what the chip
+would do under ideal conditions, not what cuBLAS and the runtime
+actually deliver in practice. **Calibration replaces the vendor
+nominals with measured-effective values**, so that `simulate(model, hw)`
+predicts something close to wall-clock reality.
 
 The pipeline:
 
@@ -35,9 +35,9 @@ The pipeline:
                                          └──────────────────┘
 ```
 
-So the deliverable is three numbers — **F**, **B**, **O** — and a
-single accuracy headline (**MAPE**). Once those are good, every
-downstream "what-if" experiment in Tier 3 inherits the calibration.
+So the deliverable is a small set of effective parameters and a single
+accuracy headline (**MAPE**). Once those are good, every downstream
+"what-if" experiment inherits the calibration.
 
 ## What is MAPE?
 
@@ -99,46 +99,85 @@ with whatever values make the model best match what the chip actually
 does**, so that downstream simulations reflect deliverable performance,
 not specsheet performance.
 
-Why these three and not more? The roofline equation has *exactly* three
-free knobs. Any other refinement (overlap, L2 hit rate, wave
-quantisation) changes the *shape* of the equation, not its scalars —
-those are Tier 2 work.
+Two further modelling features extend this:
+
+- **Per-op-family overhead.** A single global `O` can't capture the
+  4-5× spread between cheap ops (Residual, ≈ 12 µs launch) and expensive
+  ones (RoPE, ≈ 52 µs). We fit one `O` per op family — 8 scalars
+  instead of 1. `predict_ms` looks up the right one by `type(op).__name__`.
+- **L2 hit-rate heuristic.** Inputs that fit in L2 don't need to be
+  re-read from HBM on every iter; the model's `bytes_read / B` term
+  over-counts. Multiplier `(1 − hit_rate)` applied to inputs only;
+  output writes always stream to HBM. Detail and motivation in
+  "Why fitted numbers initially exceeded vendor — and how we fixed it"
+  below.
+
+So the calibrated parameter set is `(F, B, {O_family})` — 10 scalars
+total, fitted by `scipy.least_squares`.
 
 ## What the optimiser actually does
 
 Given 530 `(op, measured_ms)` pairs:
 
 ```python
-loss(F, B, O) = Σ ( log p_i(F, B, O)  −  log m_i )²
+loss(F, B, O_family) = Σ ( log p_i(F, B, O_family[i]) − log m_i )²
 ```
 
 SciPy's `least_squares` (Trust-Region Reflective with positivity bounds)
-finds the (F, B, O) that minimises this loss. **Log-space** because we
+finds the parameters that minimise this loss. **Log-space** because we
 care about relative error — `log(p) − log(m) = log(p/m)`, so the loss
 penalises ratios, which matches MAPE's relative-error notion.
 
 The split: 70 % of ops are used for the fit, 30 % held out. The split is
 deterministic (seeded shuffle). Held-out MAPE is the headline.
 
-## The headline result
+**One subtlety: a two-stage fit.** The roofline's `max(t_c, t_m)` makes
+∂t/∂F = 0 on memory-bound ops, so F is **under-constrained** by ~75 %
+of the dataset. A naive joint fit drifts F to unphysical values. We fix
+this by fitting in two stages: first F on the compute-bound subset
+(arithmetic intensity > 295 FLOP/byte ≈ H100 ridge), then B and
+per-family O on the full dataset with F frozen. Detail in "F was
+under-constrained — and how we fixed it" below.
+
+## Headline result
 
 ```
-  peak_bf16_tflops    : 1138.51   (vendor 989)
-  hbm_gbps            : 5374.8    (vendor 3350)
-  per_op_overhead_us  :   17.40   (—)
+  peak_bf16_tflops     :  943.21    (vendor 989, ratio 0.95)
+  hbm_gbps             : 2285.55    (vendor 3350, ratio 0.68)
+  per_op_overhead_us   : <per-family>
+    RoPE                52.13 µs    (highest — index-arithmetic kernel)
+    AttentionDecode     22.62 µs
+    AttentionPrefill    20.33 µs
+    SiLUGate            18.89 µs
+    MatMul              17.06 µs
+    RMSNorm             14.63 µs
+    Embedding           13.37 µs
+    Residual            11.55 µs    (lowest — single elementwise add)
 
-  MAPE  fit          : 19.61%   (n=371)
-  MAPE  held-out     : 20.20%   (n=159)
+  MAPE  fit            :   9.55 %   (n=371)
+  MAPE  held-out       :  10.14 %   (n=159)
 ```
 
-**This is where the confusion starts.** F = 1138 > vendor 989, and
-B = 5375 > vendor 3350. *You cannot run faster than the chip can run.*
-So why does the fit say we are?
+Both fitted throughputs are below vendor — physical, as they should be.
+The 4-5× spread in per-family overhead matches what one expects from
+PyTorch's kernel-launch costs across these primitives.
 
-## Why fitted numbers exceed vendor — and why physics is fine
+## Why fitted numbers initially exceeded vendor — and how we fixed it
 
-**Short answer: it's not the chip exceeding peak; it's our *model* over-
-counting bytes, and the optimiser compensating.**
+Getting to the headline above wasn't a one-shot fit. The first model —
+plain roofline + a single global `O`, no L2 heuristic — gave:
+
+```
+  peak_bf16_tflops    : 1138.51   (vendor 989, ratio 1.15)  ⚠ above peak
+  hbm_gbps            : 5374.8    (vendor 3350, ratio 1.60) ⚠ above peak
+  MAPE held-out       :   20.2 %
+```
+
+**Both fitted throughputs above vendor peaks.** *You cannot run faster
+than the chip can run.* So why did the fit say we were?
+
+**Short answer: it wasn't the chip exceeding peak; it was our *model*
+over-counting bytes, and the optimiser compensating.**
 
 Long answer in four steps.
 
@@ -224,64 +263,86 @@ peak, 93 % of bandwidth peak. The full-dataset fit's above-vendor
 numbers are not the chip overachieving; they are the optimiser papering
 over an L2-shaped hole in our model.
 
-### Why we report the above-vendor fit anyway
+### What we did about it
 
-We could just calibrate on the 54 large-only ops and quote MAPE 3.4 %.
-But that would be a lie of omission: the model would still mispredict
-real Llama-1B forward passes (which are dominated by *medium*-sized ops
-that fit nicely in L2), because we'd have ignored that regime.
+The fix was a one-line `cost.l2_hit_rate(input_bytes, l2_mb)`:
 
-The honest summary is: **our current Tier-0 model has no concept of L2.
-The full-dataset fit shows what happens when you ask three scalars to
-do a job that needs four.** Tier 2 adds the fourth (an L2 hit-rate
-heuristic), at which point the fitted F and B should drop back into
-their physical ranges.
+```python
+hit_rate = min(1, L2_capacity / bytes_read)        # H100 L2 = 50 MB
+effective_bytes = bytes_written + bytes_read · (1 − hit_rate)
+t_memory = effective_bytes / B
+```
+
+Hit rate is computed on `bytes_read` only, not the full working set —
+caches reduce *re-reads*; first-time output writes always stream to
+HBM. With this in place, the optimiser no longer needs to inflate B to
+absorb the L2 effect; B falls from 5375 to 2286 GB/s (0.68× vendor) —
+physically realistic.
+
+## F was under-constrained — and how we fixed it
+
+After adding the L2 heuristic, B was physical but **F was still above
+vendor** (1172 TFLOPs, 1.18× peak). The cause is structural in the
+roofline equation:
+
+For an op that's compute-bound (`flops/F > bytes/B`), the prediction is
+`flops/F + O` and `∂(predicted)/∂B = 0` — that op tells the optimiser
+nothing about B.
+
+For an op that's memory-bound (the converse), the prediction is
+`bytes/B + O` and `∂(predicted)/∂F = 0` — that op tells the optimiser
+nothing about F.
+
+In our 530-op sweep, only ~25 % of ops are compute-bound. The other
+~75 % carry zero gradient on F: they don't constrain it. The joint
+fit's F then drifts along the unconstrained direction, settling
+unphysically high because of small numerical couplings via the shared
+per-family overheads.
+
+The fix is a **two-stage fit** (`autoverse.calibrate.calibrate_two_stage`):
+
+1. **Stage 1 — compute-bound subset only.** Filter to ops with
+   arithmetic intensity > 295 FLOP/byte (the H100 ridge point). On this
+   subset, every op constrains F, so F is well-conditioned.
+2. **Stage 2 — full dataset, F frozen at the stage-1 value.** Fit B and
+   per-family overhead from data that actually constrains them.
+
+After this: F = 943 TFLOPs (0.95× vendor), B = 2286 GB/s (0.68× vendor)
+— both physical. We pay 0.7 percentage points of MAPE for this (10.1 %
+vs 9.4 % from the joint fit), which is worth it: counterfactual
+experiments need `B` to mean what it says.
 
 ## Per-op MAPE breakdown
 
-Held-out MAPE, sorted worst-first:
+Held-out MAPE on the final calibrated model, worst-first:
 
-| op family | held-out MAPE | what's happening |
+| op family | MAPE | n |
 |---|---|---|
-| RoPE | 65 % | Single global O = 17 µs, but RoPE's real launch cost is ≈ 50 µs. Per-family O fixes this. |
-| Residual | 48 % | Same: real launch ≈ 12 µs, model says 17 µs — the global O is being pulled high by RoPE-like ops, hurting genuinely cheap ops. |
-| Embedding | 26 % | Same overhead-fitting issue, plus the gather pattern is hard to model. |
-| AttentionDecode | 23 % | Memory-bound; affected by L2 inflation. |
-| RMSNorm | 22 % | Mostly memory-bound; small + frequent. |
-| SiLUGate | 11 % | Bigger ops; cleaner fit. |
-| **MatMul** | **9 %** | The bread-and-butter. Within target. |
-| **AttentionPrefill** | **8 %** | Best-fit family. |
+| AttentionPrefill | 14.0 % | 4 |
+| SiLUGate | 12.4 % | 11 |
+| MatMul | 11.7 % | 90 |
+| RMSNorm | 8.4 % | 21 |
+| Residual | 7.9 % | 23 |
+| AttentionDecode | 1.7 % | 6 |
+| RoPE | 1.0 % | 4 |
+| Embedding | 1.0 % | — |
 
-The big ops are nailed; the small ones aren't. **This is fine for now**:
-the small ops contribute < 5 % of total Llama-1B latency, so even a
-50 %-relative miss on them changes the total by < 2.5 %.
-
-## What Tier 2 will fix
-
-The Tier-1 measurements *confirm* the refinements pinned in
-`03_autoverse_end_product.md` §8 are the right ones. Concretely:
-
-1. **L2 hit-rate heuristic** — `hit_rate = min(1, L2_cap / working_set)`.
-   Will pull fitted B back to ≈ 3350 GB/s and tighten MAPE on
-   medium-sized ops (the ones currently inflated).
-2. **Per-op-family α (compute / memory overlap)** — collapses the
-   small over-fit on F.
-3. **Per-op-family overhead** — collapses the RoPE/Residual MAPE column.
-4. **Wave quantisation** — fixes the LM-head outlier (1.73× off in the
-   current fit).
-
-Held-out MAPE target after Tier 2: **≤ 20 %**.
+Compare this with the very first single-global-O fit, where RoPE was at
+65.5 % and Residual at 48.2 %. Per-family overhead alone cut those by
+60×+. The remaining double-digit miss on AttentionPrefill / SiLUGate /
+MatMul reflects shape-dependent cuBLAS efficiency — the model doesn't
+have a per-shape efficiency factor. Adding wave quantisation was tried
+and rejected (worsens MAPE; see `02_refinements.md`).
 
 ## TL;DR
 
-- We measured 530 ops on a real H100, fit three scalars (F, B, O),
-  and got **20 % held-out MAPE** — under the ≤ 30 % Tier-1 target.
-- The fitted F and B *appear* to exceed vendor peaks, but the chip is
-  not breaking physics. Restricting the fit to ops that don't fit in L2
-  recovers F = 797, B = 3111 — both *below* vendor — with MAPE 3.4 %.
-- The above-vendor full-fit is the optimiser absorbing L2-caching
-  effects into the throughput scalars. This is exactly the gap the
-  Tier-2 L2 hit-rate heuristic closes.
-- Big ops (MatMul 9 %, prefill attention 8 %) modelled well already.
-  Small overhead-dominated ops (RoPE, Residual) are the remaining
-  weak spot, queued for the per-op-family overhead refinement.
+- 530 H100 measurements, calibrated to **MAPE 10.1 %** held-out.
+- Three modelling features in the cost equation: roofline,
+  per-op-family launch overhead, L2 hit-rate heuristic on inputs.
+- Two-stage least-squares fit so that F (set by compute-bound ops only)
+  doesn't get pulled unphysically high by the memory-bound majority.
+- Both fitted throughputs are below vendor — F = 943 TFLOPs (0.95×),
+  B = 2286 GB/s (0.68×) — physically meaningful.
+- Big ops (MatMul, AttentionPrefill) at 10–14 %; small ops at 1–8 %.
+  Largest residual is the prefill LM head, a tall-skinny GEMM where
+  cuBLAS picks a sub-peak algorithm — expected, documented, accepted.

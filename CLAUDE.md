@@ -4,7 +4,7 @@
 
 ## Project purpose
 
-This repo is Som's code sample for the **Anthropic Fellows program** application (ML Systems & Performance track). It's built in a **4-day sprint** (Tue Apr 21 – Sun Apr 26, 2026) on a **~$1k compute budget**. The artifact is intentionally scoped to fit that window.
+This repo is Som's code sample for the **Anthropic Fellows program** application (ML Systems & Performance track). The artifact is intentionally scoped tightly: a single calibrated `HardwareSpec` (H100), a single transformer family (Llama-3.2-1B), and a single calibration target (BF16).
 
 **What Autoverse is:** an analytical (roofline++) performance model for transformer inference on GPU-like accelerators. Takes a `HardwareSpec` + a `TransformerConfig`, predicts per-op latency, calibrates to real H100 measurements, then runs "what-if" counterfactuals on hardware-spec changes.
 
@@ -15,15 +15,14 @@ This repo is Som's code sample for the **Anthropic Fellows program** application
 For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
 
 **1. Story (no code).**
-- `README.md` — what / status / install / run / data-flow diagram.
-- `reports/tier1_explained.md` — pedagogical walkthrough of MAPE, F, B, O, the
-  L2-caching artefact, and what the headline numbers mean. Read this *before*
+- `README.md` — what / headline results / modelling features / install / run.
+- `reports/01_methodology.md` — pedagogical walkthrough of MAPE, F, B, O,
+  the L2-caching diagnosis, and the two-stage fit for F. Read this *before*
   reading any analysis code.
-- `reports/01_validation.md` — formal Tier-1 validation report.
-- `reports/02_tier2.md` — Tier-2 refinements (L2 + per-family overhead +
-  two-stage F/B fit). MAPE drops from 20.2% to 10.1% with both fitted
-  throughputs in physically meaningful ranges.
-- `reports/03_whatif.md` — Tier-3 counterfactual experiments. Headline:
+- `reports/02_refinements.md` — detailed engineering log of every modelling
+  feature beyond the bare roofline (L2, per-family overhead, two-stage fit,
+  wave-quant rejected). Includes the ablation recipe.
+- `reports/03_whatif.md` — counterfactual hardware experiments. Headline:
   Llama-1B decode is overhead-bound, not memory-bound — HBM upgrades barely
   help; the big lever is collapsing the launch count.
 - `reports/figures/measured_vs_predicted.png` — one-picture residual summary.
@@ -57,10 +56,10 @@ For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
 **5. Reproduce.**
 - `make test` (CPU, ~5s) — full test suite (73 tests).
 - `make validate` (CPU, ~3s) — refit + replot from the committed JSON.
-- `make whatif` (CPU, ~2s) — regenerate the Tier-3 what-if report.
+- `make whatif` (CPU, ~2s) — regenerate the what-if report from the calibration fit.
 - `make measure` (CUDA, ~10s on H100) — collect a fresh sweep.
 
-If you only read one file: `reports/tier1_explained.md`. If you only read two,
+If you only read one file: `reports/01_methodology.md`. If you only read two,
 add `reports/03_whatif.md` for the qualitative findings.
 
 ## Planning docs (read these for context beyond this file)
@@ -78,12 +77,11 @@ Located one directory up, at `../`:
 
 Every tier is a complete, submittable artifact. The rule is **end-to-end first, then layer fidelity**.
 
-- **Day 0 (Tue Apr 21) — scaffolding.** Interfaces sketched, CI green, uv venv set up, compute booked.
-- **Tier 0 (Day 1, Wed Apr 22):** E2E skeleton. `python -m autoverse simulate --model llama1b --mode decode` prints a plausible number. No validation yet.
-- **Tier 1 (Day 2, Thu Apr 23):** Validated against real H100. Calibration fits spec params; MAPE ≤ 30% on fitted set. First real report committed.
-- **Tier 2 (Day 3, Fri Apr 24):** Fidelity refinements (wave quantization, overlap, L2 hits); held-out MAPE ≤ 20%.
-- **Tier 3 (Day 4, Sat Apr 25):** 3–5 what-if experiments; findings report; README polish.
-- **Submit (Sun Apr 26).**
+- Interfaces sketched, CI green, uv venv set up, compute booked.
+- E2E skeleton. `python -m autoverse simulate --model llama1b --mode decode` prints a plausible number. No validation yet.
+- Validated against real H100. Calibration fits spec params; MAPE ≤ 30% on fitted set. First real report committed.
+- Fidelity refinements (wave quantization, overlap, L2 hits); held-out MAPE ≤ 20%.
+- 3–5 what-if experiments; findings report; README polish.
 
 Check current status: look at `README.md` "Status" section and the latest commit message.
 
@@ -105,8 +103,8 @@ uv run ruff format .    # format
 uv run mypy src/        # type-check
 make test               # = uv run pytest -q
 make lint               # = ruff + mypy
-make validate           # Tier 1+: calibrate + generate validation report
-make whatif             # Tier 3+: run counterfactual experiments
+make validate           # calibrate + generate validation report
+make whatif             # run counterfactual experiments
 ```
 
 ### Commit discipline

@@ -60,7 +60,7 @@ sort works lexically. One sweep per file; multiple files per chip OK.
 ## `reports/calibration_fit.json`
 
 Output of `scripts/calibrate.py` (and `make calibrate` / `make validate`).
-The Tier-1 fit summary, derived from a single `measurements/.../run_*.json`.
+The calibration-fit summary, derived from a single `measurements/.../run_*.json`.
 
 ```jsonc
 {
@@ -102,4 +102,4 @@ internally, so callers always pass the human-readable numbers.
 
 **Filtering.** Calibration only fits ops whose `params.dtype` matches the
 filter (default `'bf16'`). FP32 / FP16 / FP8 measurements are silently
-dropped. Mixed-precision calibration is a Tier-2+ concern.
+dropped. Mixed-precision calibration would need a per-dtype peak.

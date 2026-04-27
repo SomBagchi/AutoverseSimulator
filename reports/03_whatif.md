@@ -1,11 +1,11 @@
-# Tier-3 What-If Experiments
+# What-if experiments — counterfactual hardware on the calibrated model
 
-> **Sprint day 4 (compressed).** Five counterfactual hardware questions
-> answered using the Tier-2-calibrated H100 model from
-> `reports/calibration_fit.json`. Baseline is the calibrated H100; each
-> experiment changes one parameter and reports the delta.
+> Five counterfactual hardware questions answered using the calibrated
+> H100 model from `reports/calibration_fit.json`. Baseline is the
+> calibrated H100; each experiment changes one parameter and reports
+> the delta.
 
-Baseline calibrated `HardwareSpec`: `F=943 TFLOPs`, `B=2285 GB/s`, `L2=50 MB`, per-family overhead from Tier-2 fit.
+Baseline calibrated `HardwareSpec`: `F=943 TFLOPs`, `B=2285 GB/s`, `L2=50 MB`, per-family overhead from the calibration fit.
 
 ## Headline finding: Llama-1B decode is overhead-bound, not memory-bound
 
@@ -78,7 +78,7 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 
 ## Caveats
 
-- Tier-2 model has held-out MAPE 9.4 %. Absolute numbers carry that error bar.
+- The calibrated model has held-out MAPE 10.1 %. Absolute numbers carry that error bar.
 - **Speedup ratios** in E1–E3 are mostly roofline-determined and survive the absolute calibration error — if 5 % of time is memory and you halve memory, you save 2.5 % regardless of whether your time was 9 % off.
 - The model has no concept of multi-GPU collectives, paged attention, speculative decoding, or batched continuous serving — explicitly out of scope per `03_autoverse_end_product.md` §2.
 - Per-op overhead is fitted from a measurement methodology that runs the same op 100 × in a tight loop. CUDA Graphs / kernel-launch APIs in production may produce lower effective overhead than this fit captures; that would shrink the overhead floor and shift these conclusions toward more conventional roofline regimes.
@@ -86,7 +86,7 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 ## Reproduce
 
 ```bash
-make whatif        # regenerates this report from the Tier-2 fit
+make whatif        # regenerates this report from the calibration fit
 ```
 
 Or for a one-off: `uv run python scripts/whatif.py --out -` prints to stdout.

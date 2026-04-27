@@ -1,15 +1,15 @@
-"""Tier-3 what-if experiments — predict counterfactual hardware scenarios.
+"""What-if experiments — predict counterfactual hardware scenarios.
 
-Reads the calibrated Tier-2 fit (``reports/calibration_fit.json``) and a
+Reads the calibration fit (``reports/calibration_fit.json``) and a
 Llama-1B op graph, then asks: what does end-to-end latency look like if we
 twiddle one of HBM bandwidth, compute throughput, or L2 capacity? And how
 does decode scale with context length?
 
-The point is not perfect prediction — Tier-2 MAPE is 9.4 %, so absolute
-numbers come with that error bar. The point is that **deltas** under
-counterfactual changes are largely roofline-determined and survive
+The point is not perfect prediction — the calibrated model has MAPE 10.1 %,
+so absolute numbers come with that error bar. The point is that **deltas**
+under counterfactual changes are largely roofline-determined and survive
 calibration error: doubling B halves memory time for memory-bound ops
-regardless of whether the absolute numbers were 9 % off.
+regardless of whether the absolute numbers were 10 % off.
 
 Usage::
 
@@ -32,7 +32,7 @@ from autoverse.ops import Op
 
 
 def _baseline_spec_from_fit(fit_path: Path) -> tuple[HardwareSpec, dict[str, float]]:
-    """Apply the Tier-2 fit to the H100 baseline spec.
+    """Apply the calibration fit to the H100 baseline spec.
 
     Returns ``(calibrated_spec, overhead_by_family)``. Overhead-by-family is
     not stored on HardwareSpec; the what-if scenarios pass it as a sidecar
@@ -52,9 +52,9 @@ def _baseline_spec_from_fit(fit_path: Path) -> tuple[HardwareSpec, dict[str, flo
 def _total_ms(
     ops: list[Op], spec: HardwareSpec, overhead_by_family: dict[str, float]
 ) -> float:
-    """Sum predict_ms across an op graph, Tier-2 (L2 + per-family) settings."""
-    # n_sm=0 disables wave quant. The published Tier-2 fit was produced with
-    # wave quant off (it strictly worsened MAPE — see reports/02_tier2.md);
+    """Sum predict_ms across an op graph with the calibrated settings (L2 + per-family)."""
+    # n_sm=0 disables wave quant. The committed fit was produced with wave
+    # quant off (it strictly worsened MAPE — see reports/02_refinements.md);
     # using it here too keeps the prediction formula matching the fit.
     return sum(
         predict_ms(
@@ -188,18 +188,18 @@ def _md(fit_path: Path) -> str:
     decode_overhead_share = decode_overhead_ms / decode_total_ms
 
     lines: list[str] = [
-        "# Tier-3 What-If Experiments",
+        "# What-if experiments — counterfactual hardware on the calibrated model",
         "",
-        "> **Sprint day 4 (compressed).** Five counterfactual hardware questions",
-        "> answered using the Tier-2-calibrated H100 model from",
-        "> `reports/calibration_fit.json`. Baseline is the calibrated H100; each",
-        "> experiment changes one parameter and reports the delta.",
+        "> Five counterfactual hardware questions answered using the calibrated",
+        "> H100 model from `reports/calibration_fit.json`. Baseline is the",
+        "> calibrated H100; each experiment changes one parameter and reports",
+        "> the delta.",
         "",
         f"Baseline calibrated `HardwareSpec`: "
         f"`F={spec.peak_bf16_tflops:.0f} TFLOPs`, "
         f"`B={spec.hbm_gbps:.0f} GB/s`, "
         f"`L2={spec.l2_mb} MB`, "
-        f"per-family overhead from Tier-2 fit.",
+        f"per-family overhead from the calibration fit.",
         "",
         "## Headline finding: Llama-1B decode is overhead-bound, not memory-bound",
         "",
@@ -345,8 +345,8 @@ def _md(fit_path: Path) -> str:
         "",
         "## Caveats",
         "",
-        "- Tier-2 model has held-out MAPE 9.4 %. Absolute numbers carry that "
-        "error bar.",
+        "- The calibrated model has held-out MAPE 10.1 %. Absolute numbers "
+        "carry that error bar.",
         "- **Speedup ratios** in E1–E3 are mostly roofline-determined and "
         "survive the absolute calibration error — if 5 % of time is memory and "
         "you halve memory, you save 2.5 % regardless of whether your time was "
@@ -363,7 +363,7 @@ def _md(fit_path: Path) -> str:
         "## Reproduce",
         "",
         "```bash",
-        "make whatif        # regenerates this report from the Tier-2 fit",
+        "make whatif        # regenerates this report from the calibration fit",
         "```",
         "",
         "Or for a one-off: `uv run python scripts/whatif.py --out -` prints to stdout.",

@@ -1,4 +1,4 @@
-"""CLI wrapper around :mod:`autoverse.calibrate` (checkpoint 2D plumbing).
+"""CLI wrapper around :mod:`autoverse.calibrate`.
 
 Loads a measurements JSON produced by ``scripts/collect_measurements.py``,
 fits ``(peak_bf16_tflops, hbm_gbps, per_op_overhead_us)``, and prints a
@@ -51,7 +51,7 @@ def main() -> int:
                         f"{H100_SXM.n_sm} to enable on H100 for ablation.")
     p.add_argument("--global-overhead", action="store_true",
                    help="Use a single global per-op overhead instead of per-family. "
-                        "Default is per-family (Tier-2).")
+                        "Default is per-family.")
     p.add_argument("--single-stage", action="store_true",
                    help="Use the joint single-stage fit (F + B + O all together) "
                         "instead of the two-stage variant (F from compute-bound; "
@@ -82,7 +82,7 @@ def main() -> int:
     print(f"  Wave quant (MatMul): n_sm={args.n_sm}"
           f" {'(disabled)' if args.n_sm == 0 else '(enabled)'}")
     print(f"  overhead model    : "
-          f"{'global' if args.global_overhead else 'per-family (Tier-2)'}")
+          f"{'global' if args.global_overhead else 'per-family'}")
     fit_mode = ("global single-stage" if args.global_overhead
                 else "single-stage per-family" if args.single_stage
                 else "two-stage (F on compute-bound; B+O on full)")
