@@ -10,6 +10,51 @@ This repo is Som's code sample for the **Anthropic Fellows program** application
 
 **What it is not:** cycle-accurate; a training-time simulator; a multi-node simulator (stretch only); a general-purpose ML framework.
 
+## Where to start reading
+
+For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
+
+**1. Story (no code).**
+- `README.md` — what / status / install / run / data-flow diagram.
+- `reports/tier1_explained.md` — pedagogical walkthrough of MAPE, F, B, O, the
+  L2-caching artefact, and what the headline numbers mean. Read this *before*
+  reading any analysis code.
+- `reports/01_validation.md` — formal Tier-1 validation report (terser).
+- `reports/figures/measured_vs_predicted.png` — one-picture summary.
+
+**2. Data + fit artifacts.**
+- `measurements/h100_sxm/run_20260426_233235.json` — 530 H100 measurements.
+  Schema documented in `reports/data_schema.md`.
+- `reports/calibration_fit.json` — fitted (F, B, O) + per-op MAPE breakdown.
+
+**3. Code, in dataflow order.**
+- Prediction pipeline:
+  `src/autoverse/ops.py` (FLOPs/bytes per op) →
+  `src/autoverse/model.py` (`build_op_graph` lowers a `TransformerConfig`) →
+  `src/autoverse/cost.py` (`estimate` is the roofline) →
+  `src/autoverse/simulator.py` (`simulate` sums per-op times) →
+  `src/autoverse/cli.py` (the `simulate` subcommand).
+- Calibration pipeline:
+  `src/autoverse/measure.py` (`time_callable` + per-op primitives) →
+  `scripts/collect_measurements.py` (sweep that produced the committed JSON) →
+  `src/autoverse/calibrate.py` (`predict_ms` is the roofline; `calibrate` is
+  the SciPy `least_squares` wrapper) →
+  `scripts/calibrate.py` + `scripts/make_validation_plot.py` (CLI + plot).
+
+**4. Tests (proof the code is correct).**
+- `tests/test_ops_flops.py` — pins the FLOP/byte formula for every op.
+- `tests/test_calibrate.py::test_calibration_recovers_synthetic_params_to_within_1pct`
+  is the headline: generate measurements from known (F, B, O), then fit, recover
+  to <1 %.
+- `tests/test_measure.py` — CPU smoke tests for the harness.
+
+**5. Reproduce.**
+- `make test` (CPU, ~5s) — full test suite.
+- `make validate` (CPU, ~3s) — refit + replot from the committed JSON.
+- `make measure` (CUDA, ~10s on H100) — collect a fresh sweep.
+
+If you only read one file: `reports/tier1_explained.md`.
+
 ## Planning docs (read these for context beyond this file)
 
 Located one directory up, at `../`:
