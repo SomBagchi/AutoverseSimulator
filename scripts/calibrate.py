@@ -41,8 +41,13 @@ def main() -> int:
     p.add_argument("--seed", type=int, default=0, help="Fit/held-out split seed.")
     p.add_argument("--fit-frac", type=float, default=0.7)
     p.add_argument("--l2-mb", type=float, default=H100_SXM.l2_mb,
-                   help="L2 capacity (MB) for the Tier-2 hit-rate heuristic. "
-                        "Set 0 to ablate (Tier-0 behaviour).")
+                   help="L2 capacity (MB) for the L2 hit-rate heuristic. "
+                        "Set 0 to ablate.")
+    p.add_argument("--n-sm", type=int, default=0,
+                   help=f"SM count for the wave-quantisation heuristic on MatMul. "
+                        f"Default 0 = OFF (wave quant strictly worsens MAPE on "
+                        f"this dataset; see reports/02_tier2.md). Pass "
+                        f"{H100_SXM.n_sm} to enable on H100 for ablation.")
     p.add_argument("--global-overhead", action="store_true",
                    help="Use a single global per-op overhead instead of per-family. "
                         "Default is per-family (Tier-2).")
@@ -65,17 +70,19 @@ def main() -> int:
     print(f"  iters per op      : {prov.get('n_iters')} (warmup {prov.get('n_warmup')})")
     print(f"  total ops loaded  : {len(ops)} (filter dtype={dtype_filter!r})")
     print(f"  L2 heuristic      : l2_mb={args.l2_mb}"
-          f" {'(disabled — Tier-0)' if args.l2_mb == 0 else '(enabled — Tier-2)'}")
+          f" {'(disabled)' if args.l2_mb == 0 else '(enabled)'}")
+    print(f"  Wave quant (MatMul): n_sm={args.n_sm}"
+          f" {'(disabled)' if args.n_sm == 0 else '(enabled)'}")
     print(f"  overhead model    : "
           f"{'global' if args.global_overhead else 'per-family (Tier-2)'}")
     print()
 
     if args.global_overhead:
         r = calibrate(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
-                      l2_mb=args.l2_mb)
+                      l2_mb=args.l2_mb, n_sm=args.n_sm)
     else:
         r = calibrate_per_family(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
-                                  l2_mb=args.l2_mb)
+                                  l2_mb=args.l2_mb, n_sm=args.n_sm)
 
     print("=== Fitted scalars (vs H100-SXM vendor nominal) ===")
     print(f"  peak_bf16_tflops    : {r.fitted_peak_bf16_tflops:8.2f}   "
@@ -107,7 +114,7 @@ def main() -> int:
     overhead_by_family = r.fitted_overhead_by_family or None
     preds = [predict_ms(op, r.fitted_peak_bf16_tflops, r.fitted_hbm_gbps,
                         r.fitted_per_op_overhead_us, args.l2_mb,
-                        overhead_by_family) for op in ops]
+                        overhead_by_family, n_sm=args.n_sm) for op in ops]
     rows = [
         (op.name, type(op).__name__, m, p, abs(p - m) / max(m, 1e-9))
         for op, m, p in zip(ops, measured_ms, preds, strict=True)

@@ -100,20 +100,32 @@ def predict_ms(
     overhead_us: float,
     l2_mb: float = 0.0,
     overhead_by_family: dict[str, float] | None = None,
+    n_sm: int = 0,
 ) -> float:
-    """Roofline prediction (with optional L2 heuristic + per-family overhead).
-    In **ms**.
+    """Roofline prediction with optional L2 heuristic, per-family overhead,
+    and wave quantisation (MatMul only). In **ms**.
 
     Kept as a free function (not a method of HardwareSpec) so calibration can
     call it in a hot loop without constructing frozen dataclasses per iter.
 
-    - ``l2_mb=0`` (default) disables the Tier-2 L2 hit-rate heuristic.
+    - ``l2_mb=0`` (default) disables the L2 hit-rate heuristic.
       Set to ``spec.l2_mb`` (50 for H100) to enable.
     - ``overhead_by_family``: when given, looks up a per-family overhead by
       ``type(op).__name__``; falls back to ``overhead_us`` for unknown families.
-      ``None`` (default) uses ``overhead_us`` everywhere — the Tier-1 behaviour.
+      ``None`` uses ``overhead_us`` everywhere.
+    - ``n_sm=0`` (default) disables wave quantisation. Set to ``spec.n_sm``
+      (132 for H100) to enable. Only affects MatMul ops.
     """
-    compute_s = op.flops() / (peak_tflops * 1e12) if peak_tflops > 0 else 0.0
+    flops = op.flops()
+    if n_sm > 0 and isinstance(op, MatMul):
+        # Mirror cost.wave_quant_factor inline to avoid the import cycle.
+        tiles_m = -(-op.m // 128)
+        tiles_n = -(-op.n // 128)
+        tiles = tiles_m * tiles_n
+        if tiles > 0:
+            waves = -(-tiles // n_sm)
+            flops = int(flops * (waves * n_sm) / tiles)
+    compute_s = flops / (peak_tflops * 1e12) if peak_tflops > 0 else 0.0
     bytes_read = op.bytes_read()
     bytes_written = op.bytes_written()
     if l2_mb > 0 and bytes_read > 0:
@@ -134,12 +146,14 @@ def _residuals(
     ops: list[Op],
     measured_ms: np.ndarray,
     l2_mb: float,
+    n_sm: int,
     eps: float = 1e-9,
 ) -> np.ndarray:
     """Log-latency residuals: ``log(predicted) - log(measured)``."""
     peak_tflops, hbm_gbps, overhead_us = params
     pred = np.asarray(
-        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb) for op in ops],
+        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb, n_sm=n_sm)
+         for op in ops],
         dtype=np.float64,
     )
     # Clip to avoid log(0) in pathological cases (shouldn't trigger with O >= 0).
@@ -191,6 +205,7 @@ def calibrate(
     seed: int = 0,
     verbose: bool = False,
     l2_mb: float = 0.0,
+    n_sm: int = 0,
 ) -> CalibrationResult:
     """Fit (F, B, O) to match measured latencies on ``ops``.
 
@@ -201,10 +216,10 @@ def calibrate(
         fit_frac: fraction of measurements used for fitting; remainder held out.
         seed: RNG seed for the fit/held-out split.
         verbose: pass through to scipy.
-        l2_mb: L2 cache capacity in MB used by the Tier-2 hit-rate heuristic.
-            ``0`` (default) disables the heuristic — recovers the Tier-0
-            behaviour and keeps synthetic-recovery tests stable. Set to
-            ``H100_SXM.l2_mb = 50`` for the real-H100 fit.
+        l2_mb: L2 cache capacity in MB used by the L2 hit-rate heuristic.
+            ``0`` (default) disables; ``50`` = H100.
+        n_sm: SM count used by the wave-quantisation heuristic on MatMul ops.
+            ``0`` (default) disables; ``132`` = H100.
     """
     if len(ops) != len(measured_ms):
         raise ValueError(f"ops/measured_ms length mismatch: {len(ops)} vs {len(measured_ms)}")
@@ -219,7 +234,7 @@ def calibrate(
     result = least_squares(
         _residuals,
         x0=np.asarray(x0, dtype=np.float64),
-        args=(fit_ops, fit_ms_arr, l2_mb),
+        args=(fit_ops, fit_ms_arr, l2_mb, n_sm),
         bounds=bounds,
         method="trf",
         verbose=2 if verbose else 0,
@@ -227,10 +242,12 @@ def calibrate(
 
     peak_tflops, hbm_gbps, overhead_us = result.x
     fit_preds = np.asarray(
-        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb) for op in fit_ops]
+        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb, n_sm=n_sm)
+         for op in fit_ops]
     )
     ho_preds = (
-        np.asarray([predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb)
+        np.asarray([predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb,
+                                n_sm=n_sm)
                     for op in ho_ops])
         if ho_ops else None
     )
@@ -261,6 +278,7 @@ def _residuals_per_family(
     measured_ms: np.ndarray,
     families: list[str],
     l2_mb: float,
+    n_sm: int,
     eps: float = 1e-9,
 ) -> np.ndarray:
     """Like _residuals, but with one overhead scalar per op family.
@@ -274,7 +292,8 @@ def _residuals_per_family(
     for op in ops:
         fam = type(op).__name__
         ov_us = float(params[2 + family_index[fam]]) if fam in family_index else 0.0
-        pred_list.append(predict_ms(op, peak_tflops, hbm_gbps, ov_us, l2_mb))
+        pred_list.append(predict_ms(op, peak_tflops, hbm_gbps, ov_us, l2_mb,
+                                     n_sm=n_sm))
     pred = np.maximum(np.asarray(pred_list, dtype=np.float64), eps)
     m = np.maximum(measured_ms, eps)
     out: np.ndarray = np.log(pred) - np.log(m)
@@ -293,6 +312,7 @@ def calibrate_per_family(
     fit_frac: float = 0.7,
     seed: int = 0,
     l2_mb: float = 0.0,
+    n_sm: int = 0,
 ) -> CalibrationResult:
     """Fit (F, B, O_per_family) — one launch overhead per op family.
 
@@ -324,7 +344,7 @@ def calibrate_per_family(
     result = least_squares(
         _residuals_per_family,
         x0=x0,
-        args=(fit_ops, fit_ms_arr, families, l2_mb),
+        args=(fit_ops, fit_ms_arr, families, l2_mb, n_sm),
         bounds=(lb, ub),
         method="trf",
     )
@@ -334,7 +354,8 @@ def calibrate_per_family(
     overhead_by_family = {fam: float(result.x[2 + i]) for i, fam in enumerate(families)}
 
     def _pred_ms(op: Op) -> float:
-        return predict_ms(op, F, B, x0_overhead_us, l2_mb, overhead_by_family)
+        return predict_ms(op, F, B, x0_overhead_us, l2_mb, overhead_by_family,
+                          n_sm=n_sm)
 
     fit_preds = np.asarray([_pred_ms(op) for op in fit_ops])
     ho_preds = np.asarray([_pred_ms(op) for op in ho_ops]) if ho_ops else None

@@ -169,11 +169,14 @@ def test_predict_ms_matches_cost_estimate() -> None:
     from autoverse.cost import estimate
 
     op = MatMul(m=1024, k=2048, n=2048, dtype="bf16")
-    # Use H100 nominals so both paths produce the same number.
+    # Use H100 nominals so both paths produce the same number. Default
+    # heuristics (L2 on, wave-quant off) match between estimate() and
+    # predict_ms(n_sm=0).
     spec = H100_SXM
     t_from_cost = estimate(op, spec).effective_ms
     t_from_calibrate = predict_ms(op, spec.peak_bf16_tflops, spec.hbm_gbps,
-                                   spec.per_op_overhead_us)
+                                   spec.per_op_overhead_us,
+                                   l2_mb=spec.l2_mb, n_sm=0)
     assert abs(t_from_cost - t_from_calibrate) < 1e-9
 
 

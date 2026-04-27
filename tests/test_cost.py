@@ -14,16 +14,16 @@ import math
 from dataclasses import replace
 
 from autoverse import H100_SXM
-from autoverse.cost import estimate, l2_hit_rate
-from autoverse.ops import AttentionDecode, Embedding, MatMul
+from autoverse.cost import estimate, l2_hit_rate, wave_quant_factor
+from autoverse.ops import AttentionDecode, Embedding, MatMul, RMSNorm
 
-# ---------- Tier-0 ablation (use_l2=False) ----------
+# ---------- Tier-0 ablation (use_l2=False, use_wave_quant=False) ----------
 
 
 def test_compute_bound_gemm_uses_flops() -> None:
     # Big square prefill GEMM: heavily compute-bound on H100.
     op = MatMul(m=2048, k=2048, n=2048, dtype="bf16")
-    timing = estimate(op, H100_SXM, use_l2=False)
+    timing = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
 
     expected_compute_ms = op.flops() / (H100_SXM.peak_bf16_tflops * 1e12) * 1e3
     assert math.isclose(timing.compute_ms, expected_compute_ms, rel_tol=1e-9)
@@ -34,7 +34,7 @@ def test_compute_bound_gemm_uses_flops() -> None:
 def test_memory_bound_attention_decode_uses_bytes() -> None:
     # Decode attention at modest context — very HBM-bound.
     op = AttentionDecode(batch=1, ctx_len=1024, n_heads=32, n_kv_heads=8, d_head=64)
-    timing = estimate(op, H100_SXM, use_l2=False)
+    timing = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
 
     bytes_moved = op.bytes_read() + op.bytes_written()
     expected_memory_ms = bytes_moved / (H100_SXM.hbm_gbps * 1e9) * 1e3
@@ -45,7 +45,7 @@ def test_memory_bound_attention_decode_uses_bytes() -> None:
 
 def test_zero_flop_op_is_memory_bound() -> None:
     op = Embedding(n_tokens=1024, d_model=2048)
-    timing = estimate(op, H100_SXM, use_l2=False)
+    timing = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
     assert timing.compute_ms == 0.0
     assert timing.memory_ms > 0
     assert math.isclose(timing.effective_ms, timing.memory_ms, rel_tol=1e-9)
@@ -72,7 +72,7 @@ def test_effective_is_max_of_compute_and_memory() -> None:
         MatMul(m=1, k=2048, n=2048),  # decode-shape GEMM (memory-bound)
         Embedding(n_tokens=1, d_model=2048),
     ]:
-        timing = estimate(op, H100_SXM, use_l2=False)
+        timing = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
         assert math.isclose(
             timing.effective_ms,
             max(timing.compute_ms, timing.memory_ms),
@@ -131,3 +131,58 @@ def test_l2_partial_hit_only_scales_input_bytes() -> None:
     assert math.isclose(cold.memory_ms, cold_expected_ms, rel_tol=1e-9)
     # Compute term is unaffected.
     assert math.isclose(warm.compute_ms, cold.compute_ms, rel_tol=1e-9)
+
+
+# ---------- Wave quantisation (Tier-2) ----------
+
+
+def test_wave_quant_factor_one_when_tiles_divide_sm_count_evenly() -> None:
+    """132 SMs, output 1024×128 ⇒ tiles = 8×1 = 8, waves = 1, penalty = 132/8 = 16.5."""
+    # The first cleanly-aligned case: tile count exactly equals SM count.
+    # M=132*128, N=128 ⇒ tiles_m=132, tiles_n=1, total=132, waves=1, factor=132/132=1.
+    factor = wave_quant_factor(output_m=132 * 128, output_n=128, n_sm=132)
+    assert factor == 1.0
+
+
+def test_wave_quant_factor_above_one_for_partial_wave() -> None:
+    """Tile count not a multiple of SM count ⇒ factor > 1."""
+    # 133 tiles on 132 SMs ⇒ 2 waves, full = 264, factor = 264/133 ≈ 1.985.
+    factor = wave_quant_factor(output_m=133 * 128, output_n=128, n_sm=132)
+    assert math.isclose(factor, 264.0 / 133, rel_tol=1e-12)
+    assert factor > 1.0
+
+
+def test_wave_quant_factor_small_when_many_waves() -> None:
+    """LM-head shape: trailing partial wave is ≪ 1 wave ⇒ small penalty."""
+    # MatMul(m=1024, n=128_256). tiles_m=8, tiles_n=128_256/128=1002 (exact).
+    # total = 8016. waves = ceil(8016/132) = 61. Factor = 61*132/8016 ≈ 1.0045.
+    factor = wave_quant_factor(output_m=1024, output_n=128_256, n_sm=132)
+    assert math.isclose(factor, (61 * 132) / 8016, rel_tol=1e-12)
+    assert 1.0 < factor < 1.01
+
+
+def test_wave_quant_factor_disabled_returns_one() -> None:
+    """n_sm=0 ⇒ heuristic ablated; factor = 1 (no penalty)."""
+    assert wave_quant_factor(output_m=1024, output_n=128, n_sm=0) == 1.0
+
+
+def test_estimate_wave_quant_only_affects_matmul() -> None:
+    """RMSNorm shouldn't see a wave-quant penalty even with use_wave_quant=True."""
+    op = RMSNorm(n_tokens=2048, d_model=4096)
+    t_off = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
+    t_on = estimate(op, H100_SXM, use_l2=False, use_wave_quant=True)
+    assert t_off.wave_quant_factor == 1.0
+    assert t_on.wave_quant_factor == 1.0
+    assert math.isclose(t_off.compute_ms, t_on.compute_ms, rel_tol=1e-12)
+
+
+def test_estimate_wave_quant_inflates_matmul_compute_term() -> None:
+    """For a MatMul with non-aligned tile count, compute_ms goes up."""
+    # 133*128 × 128 ⇒ factor ≈ 1.985.
+    op = MatMul(m=133 * 128, k=128, n=128, dtype="bf16")
+    t_off = estimate(op, H100_SXM, use_l2=False, use_wave_quant=False)
+    t_on = estimate(op, H100_SXM, use_l2=False, use_wave_quant=True)
+    assert t_on.wave_quant_factor > 1.5
+    assert t_on.compute_ms > t_off.compute_ms
+    assert math.isclose(t_on.compute_ms, t_off.compute_ms * t_on.wave_quant_factor,
+                        rel_tol=1e-9)

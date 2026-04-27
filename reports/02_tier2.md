@@ -112,21 +112,25 @@ points on aggregate held-out MAPE.
 
 The remaining flattering bias on F traces to **a single outlier**: the
 prefill LM head `MatMul(m=1024, k=2048, n=128 256)`, measured 0.818 ms
-versus predicted 0.477 ms (1.7×). For this tall-skinny GEMM the model's
-roofline math (a generous 78 % of vendor F) over-estimates effective
-throughput; cuBLAS picks an algorithm that doesn't reach the
-tensor-core roof on this shape.
+versus predicted 0.477 ms (1.7×). For this tall-skinny GEMM cuBLAS picks
+an algorithm that doesn't reach the tensor-core roof — empirically the
+chip achieves ~67 % of vendor F on this shape vs ~78 % on big square
+GEMMs.
 
-This is exactly the kind of effect the **wave-quantisation** Tier-2
-refinement (deferred from this sprint) would catch: the trailing
-partial-wave penalty on `N = 128 256 / 128 = 1002` tiles across
-`132` SMs adds up to ~5 % directly, and another 30+ % from sub-peak
-algorithm selection on tall-skinny shapes. With wave-quantisation in
-place, F should settle around 770–800 TFLOPs (real cuBLAS effective rate
-on big square GEMMs).
+We initially expected **wave quantisation** to close this, and it's the
+spec-pinned next refinement. Working through the math afterwards: for
+`(M, N) = (1024, 128 256)` tiled at 128×128, the partial-wave penalty
+factor is only 1.0045 (8016 tiles ÷ 132 SMs ⇒ 61 waves; trailing wave
+is barely partial). That's a 0.5 % effect — nowhere near the 70 %
+needed to close the lm-head gap. We implemented wave quant anyway and
+verified empirically it doesn't help — see the
+"Wave quantisation: tried, rejected" section below.
 
-We accept the lm_head as a known outlier in this Tier-2 fit and call
-out wave-quantisation as the highest-leverage next refinement.
+The actual cause of the lm-head outlier is **shape-dependent compute
+efficiency**: cuBLAS's algorithm choice for this tall-skinny shape
+operates well below the tensor-core roof. Modelling that needs a
+per-shape efficiency factor, not the geometric wave-quant heuristic.
+Out of scope for this sprint; we accept the lm_head as a known outlier.
 
 ## Worst-fit ops (Tier 2)
 
@@ -158,21 +162,73 @@ Read the plot:
   visibly off the diagonal at the high end, and the named driver of
   the residual F-above-vendor anomaly.
 
-## Tier-2 refinements deferred
+## Tier-2 refinements: status
 
 We pinned four refinements at the start of Tier 2 in
 `03_autoverse_end_product.md` §8. Status:
 
 | refinement | status | impact realised |
 |---|---|---|
-| L2 hit-rate heuristic | **shipped** | Brings B into physical range; small direct MAPE win. |
-| Per-op-family overhead | **shipped** (added based on Tier 1 findings) | The dominant MAPE win. |
-| Per-op-family α (overlap) | deferred | Would tighten the F over-fit. Lower priority once O is per-family. |
-| Wave quantisation for GEMMs | deferred | Highest-leverage next step — would close the LM-head outlier and bring F to ≈ 770 TFLOPs. |
+| L2 hit-rate heuristic | **shipped, on by default** | Brings B into physical range. |
+| Per-op-family overhead | **shipped, on by default** | The dominant MAPE win. |
+| Wave quantisation for GEMMs | **implemented; default off — see below** | Strict regression on this dataset. |
+| Per-op-family α (overlap) | deferred | Lower priority once O is per-family. |
 
-Held-out MAPE target was ≤ 20 %. We landed at 9.4 %. Further fidelity
-work is real but past the point of diminishing returns relative to what
-we want to spend Tier-3 budget on (counterfactual experiments).
+Held-out MAPE target was ≤ 20 %. We landed at 9.4 %.
+
+## Wave quantisation: tried, rejected (kept as ablation)
+
+Wave quantisation models the trailing-partial-wave penalty on a GEMM:
+the chip's `N_SM = 132` SMs process tile blocks in waves; if
+`tile_count` isn't a multiple of `N_SM`, the trailing partial wave
+still costs a full wave's wallclock. The penalty is
+`waves * N_SM / tile_count ≥ 1`, applied as a multiplier on compute
+time. We assume `BM = BN = 128` cuBLAS tiles (a common bf16 H100
+choice).
+
+We implemented it in `cost.wave_quant_factor` and wired it through
+`predict_ms` (n_sm parameter) and the calibration. **It strictly
+worsens the fit:**
+
+| | F (TFLOPs) | B (GB/s) | MAPE held-out |
+|---|---|---|---|
+| L2 + per-family O (Tier-2 default) | 1172 | 2311 | **9.40 %** |
+| L2 + per-family O **+ wave quant** | 1373 | 2280 | 11.25 % |
+
+Why the regression — three observations from the data:
+
+1. **Per-family overhead already absorbs the small-kernel wallclock
+   floor that wave quant is meant to model.** The fitted MatMul overhead
+   (16.9 µs after wave quant; 17.6 µs without) is partly real launch
+   cost and partly the implicit "no kernel finishes faster than one
+   wave's wallclock" floor. Adding an explicit wave-quant multiplier on
+   top double-counts.
+2. **The regression concentrates on small MatMuls** like `256×4096×256`
+   (4 output tiles, factor = 132/4 = 33×). Naive compute time is
+   sub-microsecond, but wave-quant inflates it to ≈ 18 µs. With overhead
+   17 µs already absorbing the floor, the model jumps to ~35 µs vs
+   measured ~20 µs — a 75 % over-prediction.
+3. **F gets pushed up to 1373 to compensate.** Higher F shrinks the naïve
+   `flops/F` term so the wave-quant-multiplied compute lands closer to
+   measured. But that breaks the big-GEMM and lm-head fits, which is
+   how MatMul MAPE goes from 10.5 % to 13.8 %.
+
+**The lm-head outlier is not what wave quantisation fixes.** For
+`MatMul(1024, 2048, 128 256)` the wave-quant penalty is 1.0045 — a
+0.5 % effect, dwarfed by the 1.7× measured-vs-predicted ratio. The
+real cause is sub-peak cuBLAS algorithm efficiency on tall-skinny
+shapes (the chip achieves ~67 % of vendor F on this op vs ~78 % on big
+square GEMMs). That needs a per-shape efficiency model, not wave
+quantisation — and is past the scope of this sprint.
+
+Wave-quant code, tests, and CLI flags are kept so a future iteration
+can ablate cleanly. Re-enable for any single run via:
+
+```bash
+uv run python scripts/calibrate.py \
+    measurements/h100_sxm/run_20260426_233235.json \
+    --n-sm 132        # default is 0 = OFF
+```
 
 ## How to reproduce
 

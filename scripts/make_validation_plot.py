@@ -47,6 +47,10 @@ def main() -> int:
     p.add_argument("--l2-mb", type=float, default=H100_SXM.l2_mb,
                    help="L2 capacity used for the heuristic in predict_ms. "
                         "Must match the value the fit was produced with.")
+    p.add_argument("--n-sm", type=int, default=0,
+                   help="SM count for wave-quant heuristic. Default 0 (off) "
+                        "matches the published Tier-2 fit. Must match the "
+                        "value the fit was produced with.")
     args = p.parse_args()
 
     if not args.fit.exists():
@@ -61,8 +65,8 @@ def main() -> int:
     mape_ho = fit.get("mape_held_out") or fit["mape_fit"]
 
     ops, measured_ms, prov = load_measurements(args.measurements, dtype_filter="bf16")
-    pred = np.asarray([predict_ms(op, F, B, Ov, args.l2_mb, overhead_by_family)
-                        for op in ops])
+    pred = np.asarray([predict_ms(op, F, B, Ov, args.l2_mb, overhead_by_family,
+                                    n_sm=args.n_sm) for op in ops])
     meas = np.asarray(measured_ms)
     types = [type(op).__name__ for op in ops]
 

@@ -53,6 +53,9 @@ def _total_ms(
     ops: list[Op], spec: HardwareSpec, overhead_by_family: dict[str, float]
 ) -> float:
     """Sum predict_ms across an op graph, Tier-2 (L2 + per-family) settings."""
+    # n_sm=0 disables wave quant. The published Tier-2 fit was produced with
+    # wave quant off (it strictly worsened MAPE — see reports/02_tier2.md);
+    # using it here too keeps the prediction formula matching the fit.
     return sum(
         predict_ms(
             op,
@@ -61,6 +64,7 @@ def _total_ms(
             spec.per_op_overhead_us,
             l2_mb=spec.l2_mb,
             overhead_by_family=overhead_by_family,
+            n_sm=0,
         )
         for op in ops
     )
@@ -76,6 +80,7 @@ def _decompose_ms(
             op, spec.peak_bf16_tflops, spec.hbm_gbps,
             spec.per_op_overhead_us, l2_mb=spec.l2_mb,
             overhead_by_family=overhead_by_family,
+            n_sm=0,
         )
         out[type(op).__name__] = out.get(type(op).__name__, 0.0) + t
     return out
