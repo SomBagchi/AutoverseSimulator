@@ -21,7 +21,12 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from autoverse.calibrate import calibrate, load_measurements, predict_ms
+from autoverse.calibrate import (
+    calibrate,
+    calibrate_per_family,
+    load_measurements,
+    predict_ms,
+)
 from autoverse.hardware import H100_SXM
 
 
@@ -35,6 +40,12 @@ def main() -> int:
                    help="Restrict fit to ops of this dtype (default bf16; '' = all).")
     p.add_argument("--seed", type=int, default=0, help="Fit/held-out split seed.")
     p.add_argument("--fit-frac", type=float, default=0.7)
+    p.add_argument("--l2-mb", type=float, default=H100_SXM.l2_mb,
+                   help="L2 capacity (MB) for the Tier-2 hit-rate heuristic. "
+                        "Set 0 to ablate (Tier-0 behaviour).")
+    p.add_argument("--global-overhead", action="store_true",
+                   help="Use a single global per-op overhead instead of per-family. "
+                        "Default is per-family (Tier-2).")
     p.add_argument("--out", type=Path, default=None,
                    help="Write fit + per-op diagnostics here as JSON.")
     args = p.parse_args()
@@ -53,16 +64,30 @@ def main() -> int:
     print(f"  dtype             : {prov.get('dtype')}")
     print(f"  iters per op      : {prov.get('n_iters')} (warmup {prov.get('n_warmup')})")
     print(f"  total ops loaded  : {len(ops)} (filter dtype={dtype_filter!r})")
+    print(f"  L2 heuristic      : l2_mb={args.l2_mb}"
+          f" {'(disabled — Tier-0)' if args.l2_mb == 0 else '(enabled — Tier-2)'}")
+    print(f"  overhead model    : "
+          f"{'global' if args.global_overhead else 'per-family (Tier-2)'}")
     print()
 
-    r = calibrate(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac)
+    if args.global_overhead:
+        r = calibrate(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
+                      l2_mb=args.l2_mb)
+    else:
+        r = calibrate_per_family(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
+                                  l2_mb=args.l2_mb)
 
     print("=== Fitted scalars (vs H100-SXM vendor nominal) ===")
     print(f"  peak_bf16_tflops    : {r.fitted_peak_bf16_tflops:8.2f}   "
           f"(vendor {H100_SXM.peak_bf16_tflops:.0f})")
     print(f"  hbm_gbps            : {r.fitted_hbm_gbps:8.1f}   "
           f"(vendor {H100_SXM.hbm_gbps:.0f})")
-    print(f"  per_op_overhead_us  : {r.fitted_per_op_overhead_us:8.3f}")
+    if r.fitted_overhead_by_family:
+        print("  per_op_overhead_us  : <per-family>")
+        for fam, ov in sorted(r.fitted_overhead_by_family.items(), key=lambda x: -x[1]):
+            print(f"    {fam:20s}  {ov:7.2f} µs")
+    else:
+        print(f"  per_op_overhead_us  : {r.fitted_per_op_overhead_us:8.3f}")
     print()
 
     print("=== Accuracy ===")
@@ -79,8 +104,10 @@ def main() -> int:
     print()
 
     # Show worst predictions for residual analysis.
+    overhead_by_family = r.fitted_overhead_by_family or None
     preds = [predict_ms(op, r.fitted_peak_bf16_tflops, r.fitted_hbm_gbps,
-                        r.fitted_per_op_overhead_us) for op in ops]
+                        r.fitted_per_op_overhead_us, args.l2_mb,
+                        overhead_by_family) for op in ops]
     rows = [
         (op.name, type(op).__name__, m, p, abs(p - m) / max(m, 1e-9))
         for op, m, p in zip(ops, measured_ms, preds, strict=True)

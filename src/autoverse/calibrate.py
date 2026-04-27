@@ -65,6 +65,12 @@ class CalibrationResult:
         fitted_peak_bf16_tflops: Effective BF16 peak, post-fit.
         fitted_hbm_gbps: Effective HBM bandwidth, post-fit.
         fitted_per_op_overhead_us: Per-op overhead constant, post-fit.
+            For per-family fits, this is the un-weighted mean of the
+            per-family overheads (a summary number, not what's used at
+            prediction time).
+        fitted_overhead_by_family: Per-op-family overhead in microseconds.
+            Empty dict for the global-overhead fit; populated by the per-family
+            variant. The prediction path uses this when non-empty.
         mape_fit: Mean absolute percentage error on the fitted subset.
         mape_held_out: MAPE on the held-out subset. ``None`` if not split.
         n_fit: Number of measurements used for fitting.
@@ -84,30 +90,56 @@ class CalibrationResult:
     per_op_mape_fit: dict[str, float] = field(default_factory=dict)
     per_op_mape_held_out: dict[str, float] = field(default_factory=dict)
     residual_cost: float = 0.0
+    fitted_overhead_by_family: dict[str, float] = field(default_factory=dict)
 
 
-def predict_ms(op: Op, peak_tflops: float, hbm_gbps: float, overhead_us: float) -> float:
-    """Tier-0 roofline prediction, parameterised by ``(F, B, O)``. In **ms**.
+def predict_ms(
+    op: Op,
+    peak_tflops: float,
+    hbm_gbps: float,
+    overhead_us: float,
+    l2_mb: float = 0.0,
+    overhead_by_family: dict[str, float] | None = None,
+) -> float:
+    """Roofline prediction (with optional L2 heuristic + per-family overhead).
+    In **ms**.
 
     Kept as a free function (not a method of HardwareSpec) so calibration can
     call it in a hot loop without constructing frozen dataclasses per iter.
+
+    - ``l2_mb=0`` (default) disables the Tier-2 L2 hit-rate heuristic.
+      Set to ``spec.l2_mb`` (50 for H100) to enable.
+    - ``overhead_by_family``: when given, looks up a per-family overhead by
+      ``type(op).__name__``; falls back to ``overhead_us`` for unknown families.
+      ``None`` (default) uses ``overhead_us`` everywhere — the Tier-1 behaviour.
     """
     compute_s = op.flops() / (peak_tflops * 1e12) if peak_tflops > 0 else 0.0
-    bytes_moved = op.bytes_read() + op.bytes_written()
-    memory_s = bytes_moved / (hbm_gbps * 1e9) if hbm_gbps > 0 else 0.0
-    return max(compute_s, memory_s) * 1e3 + overhead_us * 1e-3
+    bytes_read = op.bytes_read()
+    bytes_written = op.bytes_written()
+    if l2_mb > 0 and bytes_read > 0:
+        hit = min(1.0, (l2_mb * 1024 * 1024) / bytes_read)
+        effective_bytes = bytes_written + bytes_read * (1.0 - hit)
+    else:
+        effective_bytes = bytes_read + bytes_written
+    memory_s = effective_bytes / (hbm_gbps * 1e9) if hbm_gbps > 0 else 0.0
+    if overhead_by_family:
+        ov_us = overhead_by_family.get(type(op).__name__, overhead_us)
+    else:
+        ov_us = overhead_us
+    return max(compute_s, memory_s) * 1e3 + ov_us * 1e-3
 
 
 def _residuals(
     params: np.ndarray,
     ops: list[Op],
     measured_ms: np.ndarray,
+    l2_mb: float,
     eps: float = 1e-9,
 ) -> np.ndarray:
     """Log-latency residuals: ``log(predicted) - log(measured)``."""
     peak_tflops, hbm_gbps, overhead_us = params
     pred = np.asarray(
-        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us) for op in ops],
+        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb) for op in ops],
         dtype=np.float64,
     )
     # Clip to avoid log(0) in pathological cases (shouldn't trigger with O >= 0).
@@ -158,6 +190,7 @@ def calibrate(
     fit_frac: float = 0.7,
     seed: int = 0,
     verbose: bool = False,
+    l2_mb: float = 0.0,
 ) -> CalibrationResult:
     """Fit (F, B, O) to match measured latencies on ``ops``.
 
@@ -168,6 +201,10 @@ def calibrate(
         fit_frac: fraction of measurements used for fitting; remainder held out.
         seed: RNG seed for the fit/held-out split.
         verbose: pass through to scipy.
+        l2_mb: L2 cache capacity in MB used by the Tier-2 hit-rate heuristic.
+            ``0`` (default) disables the heuristic — recovers the Tier-0
+            behaviour and keeps synthetic-recovery tests stable. Set to
+            ``H100_SXM.l2_mb = 50`` for the real-H100 fit.
     """
     if len(ops) != len(measured_ms):
         raise ValueError(f"ops/measured_ms length mismatch: {len(ops)} vs {len(measured_ms)}")
@@ -182,7 +219,7 @@ def calibrate(
     result = least_squares(
         _residuals,
         x0=np.asarray(x0, dtype=np.float64),
-        args=(fit_ops, fit_ms_arr),
+        args=(fit_ops, fit_ms_arr, l2_mb),
         bounds=bounds,
         method="trf",
         verbose=2 if verbose else 0,
@@ -190,10 +227,11 @@ def calibrate(
 
     peak_tflops, hbm_gbps, overhead_us = result.x
     fit_preds = np.asarray(
-        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us) for op in fit_ops]
+        [predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb) for op in fit_ops]
     )
     ho_preds = (
-        np.asarray([predict_ms(op, peak_tflops, hbm_gbps, overhead_us) for op in ho_ops])
+        np.asarray([predict_ms(op, peak_tflops, hbm_gbps, overhead_us, l2_mb)
+                    for op in ho_ops])
         if ho_ops else None
     )
 
@@ -204,6 +242,111 @@ def calibrate(
         fitted_peak_bf16_tflops=float(peak_tflops),
         fitted_hbm_gbps=float(hbm_gbps),
         fitted_per_op_overhead_us=float(overhead_us),
+        mape_fit=mape_fit_val,
+        mape_held_out=mape_ho_val,
+        n_fit=len(fit_ops),
+        n_held_out=len(ho_ops),
+        per_op_mape_fit=_mape_by_op_type(fit_ops, fit_preds, fit_ms_arr),
+        per_op_mape_held_out=(
+            _mape_by_op_type(ho_ops, ho_preds, ho_ms_arr)
+            if ho_preds is not None and len(ho_preds) else {}
+        ),
+        residual_cost=float(result.cost),
+    )
+
+
+def _residuals_per_family(
+    params: np.ndarray,
+    ops: list[Op],
+    measured_ms: np.ndarray,
+    families: list[str],
+    l2_mb: float,
+    eps: float = 1e-9,
+) -> np.ndarray:
+    """Like _residuals, but with one overhead scalar per op family.
+
+    ``params`` layout: ``[F, B, O_family_0, O_family_1, ...]`` in the same
+    order as ``families``.
+    """
+    peak_tflops, hbm_gbps = params[0], params[1]
+    family_index = {f: i for i, f in enumerate(families)}
+    pred_list: list[float] = []
+    for op in ops:
+        fam = type(op).__name__
+        ov_us = float(params[2 + family_index[fam]]) if fam in family_index else 0.0
+        pred_list.append(predict_ms(op, peak_tflops, hbm_gbps, ov_us, l2_mb))
+    pred = np.maximum(np.asarray(pred_list, dtype=np.float64), eps)
+    m = np.maximum(measured_ms, eps)
+    out: np.ndarray = np.log(pred) - np.log(m)
+    return out
+
+
+def calibrate_per_family(
+    ops: list[Op],
+    measured_ms: list[float],
+    *,
+    x0_FB: tuple[float, float] = (989.0, 3350.0),
+    x0_overhead_us: float = 5.0,
+    bound_overhead_us: tuple[float, float] = (0.0, 200.0),
+    bound_F: tuple[float, float] = (1e-3, 4000.0),
+    bound_B: tuple[float, float] = (1e-3, 12000.0),
+    fit_frac: float = 0.7,
+    seed: int = 0,
+    l2_mb: float = 0.0,
+) -> CalibrationResult:
+    """Fit (F, B, O_per_family) — one launch overhead per op family.
+
+    Higher-leverage than fitting a single global ``O`` when the dataset has a
+    mix of overhead-dominated op families: a single global ``O`` is pulled
+    high by RoPE-like ops with real ~50 µs launch costs, hurting the fit on
+    genuinely-cheap residual / RMSNorm ops at ~12 µs.
+
+    Number of free params = 2 + N_families (typically 10 for a Llama-1B sweep).
+    Still well-determined with ~500 measurements.
+    """
+    if len(ops) != len(measured_ms):
+        raise ValueError(f"ops/measured_ms length mismatch: {len(ops)} vs {len(measured_ms)}")
+    if len(ops) < 4:
+        raise ValueError(f"need >=4 measurements; got {len(ops)}")
+
+    fit_ops, fit_ms, ho_ops, ho_ms = split_fit_held_out(ops, measured_ms,
+                                                        fit_frac=fit_frac, seed=seed)
+    families = sorted({type(op).__name__ for op in fit_ops})
+    n_fam = len(families)
+
+    x0 = np.array([x0_FB[0], x0_FB[1], *([x0_overhead_us] * n_fam)], dtype=np.float64)
+    lb = np.array([bound_F[0], bound_B[0], *([bound_overhead_us[0]] * n_fam)])
+    ub = np.array([bound_F[1], bound_B[1], *([bound_overhead_us[1]] * n_fam)])
+
+    fit_ms_arr = np.asarray(fit_ms, dtype=np.float64)
+    ho_ms_arr = np.asarray(ho_ms, dtype=np.float64)
+
+    result = least_squares(
+        _residuals_per_family,
+        x0=x0,
+        args=(fit_ops, fit_ms_arr, families, l2_mb),
+        bounds=(lb, ub),
+        method="trf",
+    )
+
+    F = float(result.x[0])
+    B = float(result.x[1])
+    overhead_by_family = {fam: float(result.x[2 + i]) for i, fam in enumerate(families)}
+
+    def _pred_ms(op: Op) -> float:
+        return predict_ms(op, F, B, x0_overhead_us, l2_mb, overhead_by_family)
+
+    fit_preds = np.asarray([_pred_ms(op) for op in fit_ops])
+    ho_preds = np.asarray([_pred_ms(op) for op in ho_ops]) if ho_ops else None
+
+    mape_fit_val = _mape(fit_preds, fit_ms_arr)
+    mape_ho_val = _mape(ho_preds, ho_ms_arr) if ho_preds is not None and len(ho_preds) else None
+
+    return CalibrationResult(
+        fitted_peak_bf16_tflops=F,
+        fitted_hbm_gbps=B,
+        fitted_per_op_overhead_us=float(np.mean(list(overhead_by_family.values()))),
+        fitted_overhead_by_family=overhead_by_family,
         mape_fit=mape_fit_val,
         mape_held_out=mape_ho_val,
         n_fit=len(fit_ops),

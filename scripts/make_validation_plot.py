@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 from autoverse.calibrate import load_measurements, predict_ms  # noqa: E402
+from autoverse.hardware import H100_SXM  # noqa: E402
 
 # Stable colour mapping so plots across runs stay comparable.
 _COLOURS = {
@@ -43,6 +44,9 @@ def main() -> int:
                    default=Path("reports/calibration_fit.json"))
     p.add_argument("--out", type=Path,
                    default=Path("reports/figures/measured_vs_predicted.png"))
+    p.add_argument("--l2-mb", type=float, default=H100_SXM.l2_mb,
+                   help="L2 capacity used for the heuristic in predict_ms. "
+                        "Must match the value the fit was produced with.")
     args = p.parse_args()
 
     if not args.fit.exists():
@@ -53,10 +57,12 @@ def main() -> int:
     F = fit["fitted_peak_bf16_tflops"]
     B = fit["fitted_hbm_gbps"]
     Ov = fit["fitted_per_op_overhead_us"]
+    overhead_by_family = fit.get("fitted_overhead_by_family") or None
     mape_ho = fit.get("mape_held_out") or fit["mape_fit"]
 
     ops, measured_ms, prov = load_measurements(args.measurements, dtype_filter="bf16")
-    pred = np.asarray([predict_ms(op, F, B, Ov) for op in ops])
+    pred = np.asarray([predict_ms(op, F, B, Ov, args.l2_mb, overhead_by_family)
+                        for op in ops])
     meas = np.asarray(measured_ms)
     types = [type(op).__name__ for op in ops]
 
@@ -83,9 +89,11 @@ def main() -> int:
     ax.set_ylim(lo, hi)
     ax.set_xlabel("measured (ms)")
     ax.set_ylabel("predicted (ms)")
+    tier_label = "Tier-2" if overhead_by_family else "Tier-1"
+    overhead_label = "<per-family>" if overhead_by_family else f"{Ov:.1f} μs"
     ax.set_title(
-        f"Tier-1 roofline fit on {prov.get('gpu_name')}\n"
-        f"F={F:.0f} TFLOPs · B={B:.0f} GB/s · O={Ov:.1f} μs · "
+        f"{tier_label} roofline fit on {prov.get('gpu_name')}\n"
+        f"F={F:.0f} TFLOPs · B={B:.0f} GB/s · O={overhead_label} · "
         f"MAPE held-out = {mape_ho*100:.1f}%"
     )
     ax.legend(loc="upper left", fontsize=8, framealpha=0.95)

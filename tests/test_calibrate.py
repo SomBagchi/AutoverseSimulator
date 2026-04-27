@@ -16,6 +16,7 @@ from autoverse.calibrate import (
     CalibrationResult,
     apply,
     calibrate,
+    calibrate_per_family,
     load_measurements,
     predict_ms,
     split_fit_held_out,
@@ -228,6 +229,60 @@ def test_load_measurements_reconstructs_ops_and_filters_dtype(tmp_path: Path) ->
     # No filter ⇒ keep everything.
     all_ops, _, _ = load_measurements(path, dtype_filter=None)
     assert len(all_ops) == len(ops)
+
+
+def test_calibrate_per_family_recovers_per_family_overheads() -> None:
+    """Synthetic recovery for the per-family fit: assign distinct overheads per
+    op type, generate measurements, fit, recover each within ~5%."""
+    F_true, B_true = 800.0, 3000.0
+    overhead_true = {
+        "MatMul": 5.0,
+        "RMSNorm": 3.0,
+    }
+
+    ops = [
+        MatMul(m=4096, k=4096, n=4096),  # compute-bound, pins F
+        MatMul(m=2048, k=4096, n=4096),
+        MatMul(m=1024, k=4096, n=4096),
+        MatMul(m=1, k=4096, n=128_256),  # memory-bound, pins B
+        RMSNorm(n_tokens=4096, d_model=4096),
+        RMSNorm(n_tokens=2048, d_model=4096),
+        RMSNorm(n_tokens=1024, d_model=4096),
+        RMSNorm(n_tokens=512, d_model=4096),
+        MatMul(m=8, k=16, n=16),     # overhead-dominated MatMul
+        RMSNorm(n_tokens=1, d_model=128),  # overhead-dominated RMSNorm
+    ]
+    measured = [
+        predict_ms(op, F_true, B_true, 0.0, l2_mb=0,
+                   overhead_by_family=overhead_true)
+        for op in ops
+    ]
+
+    r = calibrate_per_family(ops, measured, x0_FB=(989.0, 3350.0), seed=0)
+
+    assert abs(r.fitted_peak_bf16_tflops - F_true) / F_true < 0.05
+    assert abs(r.fitted_hbm_gbps - B_true) / B_true < 0.05
+    for fam, expected in overhead_true.items():
+        got = r.fitted_overhead_by_family[fam]
+        assert abs(got - expected) / max(expected, 1e-6) < 0.05, (fam, got, expected)
+
+
+def test_calibrate_per_family_with_l2_runs_cleanly() -> None:
+    """Smoke test: full pipeline with both Tier-2 refinements active."""
+    ops = [MatMul(m=4096, k=4096, n=4096),
+           MatMul(m=1, k=4096, n=128_256),
+           RMSNorm(n_tokens=4096, d_model=4096),
+           RMSNorm(n_tokens=8, d_model=64)]
+    # Generate noise-free synthetic measurements with a known per-family overhead.
+    F, B = 700.0, 2800.0
+    overheads = {"MatMul": 4.0, "RMSNorm": 2.0}
+    measured = [predict_ms(op, F, B, 0.0, l2_mb=50, overhead_by_family=overheads)
+                for op in ops]
+    r = calibrate_per_family(ops, measured, l2_mb=50, x0_FB=(989.0, 3350.0))
+    assert r.mape_fit < 1e-3
+    # Held-out has 1 op (4-element list, 70/30 split → 3 fit / 1 ho); fine.
+    assert "MatMul" in r.fitted_overhead_by_family
+    assert "RMSNorm" in r.fitted_overhead_by_family
 
 
 def test_calibration_on_llama_graph_is_stable() -> None:
