@@ -381,6 +381,92 @@ def calibrate_per_family(
     )
 
 
+def calibrate_two_stage(
+    ops: list[Op],
+    measured_ms: list[float],
+    *,
+    ridge_flops_per_byte: float = 295.0,
+    l2_mb: float = 0.0,
+    n_sm: int = 0,
+    seed: int = 0,
+    fit_frac: float = 0.7,
+    x0_overhead_us: float = 5.0,
+    bound_overhead_us: tuple[float, float] = (0.0, 200.0),
+    bound_F: tuple[float, float] = (1e-3, 4000.0),
+    bound_B: tuple[float, float] = (1e-3, 12000.0),
+) -> CalibrationResult:
+    """Two-stage calibration: F from compute-bound ops; B + per-family O from all.
+
+    Why this exists: in the joint per-family fit, memory-bound ops put weak
+    gradient on F (their predicted time barely depends on F — it's bottlenecked
+    by ``bytes/B`` or by per-op overhead). With ~75% of the Llama-1B sweep
+    being memory- or overhead-bound, the optimiser drifts F toward unphysical
+    values (e.g. 1172 TFLOPs vs vendor 989) without strong counter-pressure.
+
+    The fix splits responsibility between two fits:
+
+    - **Stage 1 — compute-bound subset only.** Filter ops by arithmetic
+      intensity ``flops / bytes > ridge_flops_per_byte`` (default 295,
+      H100 vendor ridge). On this subset, ``t_compute`` dominates ``t_memory``,
+      so the fit on F is well-conditioned. We fit ``(F, B, per-family O)`` and
+      keep only F.
+    - **Stage 2 — full dataset, F frozen at the stage-1 value.** Fit B and
+      per-family overhead. With F fixed at a physically-sensible value,
+      memory-bound ops are no longer at war with compute-bound ops over F,
+      and each scalar settles where its data actually constrains it.
+
+    Returns a :class:`CalibrationResult` with F from stage 1, everything else
+    from stage 2. ``mape_fit`` / ``mape_held_out`` are reported on the stage-2
+    full-dataset fit (same denominator as the joint per-family fit, so the
+    headline MAPE comparison is apples-to-apples).
+    """
+    if len(ops) != len(measured_ms):
+        raise ValueError(f"ops/measured_ms length mismatch: {len(ops)} vs {len(measured_ms)}")
+    if len(ops) < 8:
+        raise ValueError(f"need >=8 measurements for two-stage fit; got {len(ops)}")
+
+    cb_ops: list[Op] = []
+    cb_ms: list[float] = []
+    for op, t in zip(ops, measured_ms, strict=True):
+        bytes_total = op.bytes_read() + op.bytes_written()
+        if bytes_total <= 0:
+            continue
+        if op.flops() / bytes_total > ridge_flops_per_byte:
+            cb_ops.append(op)
+            cb_ms.append(t)
+
+    if len(cb_ops) < 4:
+        raise ValueError(
+            f"need >=4 compute-bound ops (AI > {ridge_flops_per_byte}) for stage 1; "
+            f"got {len(cb_ops)}. Lower ridge_flops_per_byte or add bigger GEMMs."
+        )
+
+    # Stage 1: compute-bound subset, fit F (and aux per-family overheads).
+    r1 = calibrate_per_family(
+        cb_ops, cb_ms,
+        l2_mb=l2_mb, n_sm=n_sm, seed=seed, fit_frac=fit_frac,
+        x0_overhead_us=x0_overhead_us, bound_overhead_us=bound_overhead_us,
+        bound_F=bound_F, bound_B=bound_B,
+    )
+    F_stage1 = r1.fitted_peak_bf16_tflops
+
+    # Stage 2: full dataset, F effectively frozen via tight bounds.
+    eps_rel = 1e-6
+    r2 = calibrate_per_family(
+        ops, measured_ms,
+        x0_FB=(F_stage1, r1.fitted_hbm_gbps),
+        bound_F=(F_stage1 * (1 - eps_rel), F_stage1 * (1 + eps_rel)),
+        bound_B=bound_B,
+        l2_mb=l2_mb, n_sm=n_sm, seed=seed, fit_frac=fit_frac,
+        x0_overhead_us=x0_overhead_us, bound_overhead_us=bound_overhead_us,
+    )
+
+    # Pin F exactly to the stage-1 value (tight bound is a numerical
+    # approximation; users want F=F_stage1 reported exactly).
+    from dataclasses import replace as _replace
+    return _replace(r2, fitted_peak_bf16_tflops=F_stage1)
+
+
 def apply(spec: HardwareSpec, r: CalibrationResult) -> HardwareSpec:
     """Return a new HardwareSpec with the calibrated scalars swapped in."""
     from dataclasses import replace

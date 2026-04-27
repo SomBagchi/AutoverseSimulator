@@ -20,8 +20,9 @@ For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
   L2-caching artefact, and what the headline numbers mean. Read this *before*
   reading any analysis code.
 - `reports/01_validation.md` — formal Tier-1 validation report.
-- `reports/02_tier2.md` — Tier-2 refinements (L2 + per-family overhead),
-  MAPE drops from 20.2% to 9.4%.
+- `reports/02_tier2.md` — Tier-2 refinements (L2 + per-family overhead +
+  two-stage F/B fit). MAPE drops from 20.2% to 10.1% with both fitted
+  throughputs in physically meaningful ranges.
 - `reports/03_whatif.md` — Tier-3 counterfactual experiments. Headline:
   Llama-1B decode is overhead-bound, not memory-bound — HBM upgrades barely
   help; the big lever is collapsing the launch count.

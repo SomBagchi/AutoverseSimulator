@@ -17,6 +17,7 @@ from autoverse.calibrate import (
     apply,
     calibrate,
     calibrate_per_family,
+    calibrate_two_stage,
     load_measurements,
     predict_ms,
     split_fit_held_out,
@@ -286,6 +287,54 @@ def test_calibrate_per_family_with_l2_runs_cleanly() -> None:
     # Held-out has 1 op (4-element list, 70/30 split → 3 fit / 1 ho); fine.
     assert "MatMul" in r.fitted_overhead_by_family
     assert "RMSNorm" in r.fitted_overhead_by_family
+
+
+def test_calibrate_two_stage_keeps_F_in_physical_range() -> None:
+    """Two-stage fit's defining behaviour: F set by compute-bound ops only,
+    insulated from memory-bound ops that pull it unphysically high."""
+    F_true, B_true = 800.0, 3000.0
+    overheads = {"MatMul": 5.0, "RMSNorm": 3.0, "Residual": 2.0}
+
+    # Mix of compute-bound (big square GEMMs) and memory/overhead-dominated ops.
+    ops: list = [
+        # Compute-bound (AI > 295): pin F.
+        MatMul(m=4096, k=4096, n=4096),
+        MatMul(m=2048, k=4096, n=4096),
+        MatMul(m=1024, k=2048, n=2048),
+        MatMul(m=4096, k=2048, n=4096),
+        # Memory-bound and overhead-dominated: should NOT participate in F's fit.
+        MatMul(m=1, k=4096, n=128_256),
+        MatMul(m=1, k=2048, n=2048),
+        RMSNorm(n_tokens=4096, d_model=4096),
+        RMSNorm(n_tokens=1024, d_model=2048),
+        RMSNorm(n_tokens=8, d_model=64),
+    ]
+    measured = [predict_ms(op, F_true, B_true, 0.0, l2_mb=0,
+                           overhead_by_family=overheads) for op in ops]
+
+    r = calibrate_two_stage(ops, measured, ridge_flops_per_byte=295.0, seed=0)
+    # F should be recovered close to ground truth, NOT drift to the upper bound.
+    assert abs(r.fitted_peak_bf16_tflops - F_true) / F_true < 0.05, r.fitted_peak_bf16_tflops
+    # B and per-family overheads should also recover from stage 2.
+    assert abs(r.fitted_hbm_gbps - B_true) / B_true < 0.05
+    for fam in ("MatMul", "RMSNorm"):
+        assert abs(r.fitted_overhead_by_family[fam] - overheads[fam]) < 0.5
+
+
+def test_calibrate_two_stage_rejects_too_few_compute_bound_ops() -> None:
+    """Without enough compute-bound ops in the dataset, stage 1 can't fit F."""
+    # All memory-bound ops (AI < 295).
+    ops = [MatMul(m=1, k=2048, n=2048),
+           RMSNorm(n_tokens=1024, d_model=2048),
+           RMSNorm(n_tokens=512, d_model=2048),
+           RMSNorm(n_tokens=256, d_model=2048),
+           RMSNorm(n_tokens=128, d_model=2048),
+           RMSNorm(n_tokens=64, d_model=2048),
+           RMSNorm(n_tokens=32, d_model=2048),
+           RMSNorm(n_tokens=16, d_model=2048)]
+    measured = [predict_ms(op, 800.0, 3000.0, 5.0, l2_mb=0) for op in ops]
+    with pytest.raises(ValueError, match="compute-bound"):
+        calibrate_two_stage(ops, measured)
 
 
 def test_calibration_on_llama_graph_is_stable() -> None:

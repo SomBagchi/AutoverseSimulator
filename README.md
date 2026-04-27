@@ -61,7 +61,8 @@ Two pipelines, sharing a single `Op` representation:
 ## Status
 
 **Tier 3 — counterfactual experiments shipped.** The simulator is calibrated to
-**MAPE 9.4 % held-out** on real H100 measurements (Tier 2 — see
+**MAPE 10.1 % held-out** on real H100 measurements with both fitted throughputs
+in physically meaningful ranges (Tier 2 — see
 [`reports/02_tier2.md`](./reports/02_tier2.md)) and is now running what-if
 scenarios on the resulting model.
 
@@ -80,11 +81,17 @@ falsifiable.
 
 | | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|
-| Held-out MAPE | 20.2 % | 9.4 % | 9.4 % |
-| Refinements | roofline + global O | + L2 hit-rate + per-family O | (unchanged from T2) |
-| Fitted F (TFLOPs) | 1138 (1.15× vendor) | 1172 | 1172 |
-| Fitted B (GB/s) | 5375 (1.60× vendor) | **2311** (back in physical range) | 2311 |
+| Held-out MAPE | 20.2 % | 10.1 % | 10.1 % |
+| Refinements | roofline + global O | + L2 hit-rate + per-family O + two-stage F/B fit | (unchanged from T2) |
+| Fitted F (TFLOPs) | 1138 (1.15× vendor) | **943** (0.95× vendor) | 943 |
+| Fitted B (GB/s) | 5375 (1.60× vendor) | **2286** (0.68× vendor) | 2286 |
 | Artifact | [01_validation.md](./reports/01_validation.md) | [02_tier2.md](./reports/02_tier2.md) | [03_whatif.md](./reports/03_whatif.md) |
+
+Both fitted throughputs now sit *below* vendor — physically meaningful, as
+they should be. Getting F there required a two-stage fit (F from compute-bound
+ops only; B + per-family overhead from the full dataset with F frozen). The
+joint single-stage fit drifts F to 1.18× vendor because most ops in the
+dataset don't constrain F. See `reports/02_tier2.md` §"Two-stage fit".
 
 For a first-time reader, start here: [`reports/tier1_explained.md`](./reports/tier1_explained.md)
 walks through MAPE, F, B, O, and the L2-caching artefact from first principles.

@@ -10,17 +10,21 @@
 
 |   | Tier 1 | Tier 2 (this report) | target |
 |---|---|---|---|
-| **MAPE held-out** | 20.2 % | **9.4 %** | ≤ 20 % |
-| MAPE fit          | 19.6 % | 8.4 %   | — |
-| fitted F (TFLOPs) | 1138 (1.15× vendor) | 1172 (1.18× vendor) | physical ≤ 989 |
-| fitted B (GB/s)   | 5375 (1.60× vendor) | **2311 (0.69× vendor)** | physical ≤ 3350 |
-| worst per-op MAPE | RoPE 65 % | AttentionPrefill 13 % | — |
+| **MAPE held-out** | 20.2 % | **10.1 %** | ≤ 20 % |
+| MAPE fit          | 19.6 % | 9.6 %   | — |
+| fitted F (TFLOPs) | 1138 (1.15× vendor) | **943 (0.95× vendor)** | physical ≤ 989 |
+| fitted B (GB/s)   | 5375 (1.60× vendor) | **2286 (0.68× vendor)** | physical ≤ 3350 |
+| worst per-op MAPE | RoPE 65 % | AttentionPrefill 14 % | — |
 
-**Verdict: Tier 2 ships, more than 2× under target.** The MAPE win comes
-almost entirely from per-family overhead. The L2 heuristic doesn't move
-MAPE much on its own but is what gets `B` back into a physically
-meaningful range — important for Tier-3 what-if questions like *"what if
-HBM bandwidth doubled?"* where the baseline `B` needs to mean something.
+**Verdict: Tier 2 ships, ~2× under MAPE target, with both throughputs
+back in physically meaningful ranges.** Three refinements working
+together:
+
+1. **L2 hit-rate heuristic** — gets `B` back below vendor.
+2. **Per-op-family overhead** — the dominant MAPE win.
+3. **Two-stage fit** — F set by compute-bound ops only; without this,
+   F drifts unphysically high (1172 TFLOPs in the joint single-stage
+   fit) because most ops in the dataset don't constrain F.
 
 ## What changed from Tier 1
 
@@ -94,58 +98,75 @@ Held-out MAPE, sorted worst-first:
 |---|---|---|---|
 | RoPE | 65.5 % | **1.0 %** | 66× |
 | Residual | 48.2 % | 7.9 % | 6× |
-| Embedding | 26.0 % | 0.9 % | 30× |
+| Embedding | 26.0 % | 1.0 % | 26× |
 | AttentionDecode | 22.7 % | 1.7 % | 13× |
 | RMSNorm | 21.7 % | 8.4 % | 2.6× |
-| SiLUGate | 11.0 % | 12.5 % | slight regression |
-| MatMul | 9.2 % | 10.5 % | slight regression |
-| AttentionPrefill | 8.2 % | 13.0 % | regression |
+| SiLUGate | 11.0 % | 12.4 % | slight regression |
+| MatMul | 9.2 % | 11.7 % | slight regression |
+| AttentionPrefill | 8.2 % | 14.0 % | regression |
 
-**The two regressions are the result of B fitting low (2311 GB/s).**
-With B physically realistic, memory time goes up for memory-bound ops
-that don't fit in L2 — the MatMul and SiLUGate / prefill subset where
-the working set spills out of L2 now pays full bandwidth time, and a
-few of those didn't fully accept that. Net win is still ≥ 11 percentage
-points on aggregate held-out MAPE.
+**The three regressions are the price of physically meaningful F and B.**
+With F set by compute-bound ops only (943 TFLOPs, ≈ 95 % of vendor) and
+B fitted from memory-bound ops (2286 GB/s, ≈ 68 % of vendor), the model
+no longer absorbs systematic biases via inflated throughputs. The
+remaining error on MatMul / AttentionPrefill / SiLUGate is real
+shape-dependent inefficiency — cuBLAS's algorithm choice varies with
+shape and doesn't always reach the same fraction of peak. Net win is
+still ≥ 10 percentage points on aggregate held-out MAPE.
 
-## Why F is *still* above vendor (1172 vs 989)
+## Two-stage fit: how we got F into the physical range
 
-The remaining flattering bias on F traces to **a single outlier**: the
-prefill LM head `MatMul(m=1024, k=2048, n=128 256)`, measured 0.818 ms
-versus predicted 0.477 ms (1.7×). For this tall-skinny GEMM cuBLAS picks
-an algorithm that doesn't reach the tensor-core roof — empirically the
-chip achieves ~67 % of vendor F on this shape vs ~78 % on big square
-GEMMs.
+In the joint per-family fit (single-stage), F drifts to **1172 TFLOPs
+(1.18× vendor)** despite the chip not being able to deliver that much.
+The reason: most ops in the 530-op sweep are memory-bound or
+overhead-dominated. For those ops, predicted time is `max(t_c, t_m) + O`
+with `t_m` or `O` dominating — the predicted time barely depends on F.
+F is *under-constrained* by ~75 % of the dataset. The optimiser settles
+wherever its loss landscape happens to have its minimum in the F
+direction, which can be unphysical.
 
-We initially expected **wave quantisation** to close this, and it's the
-spec-pinned next refinement. Working through the math afterwards: for
-`(M, N) = (1024, 128 256)` tiled at 128×128, the partial-wave penalty
-factor is only 1.0045 (8016 tiles ÷ 132 SMs ⇒ 61 waves; trailing wave
-is barely partial). That's a 0.5 % effect — nowhere near the 70 %
-needed to close the lm-head gap. We implemented wave quant anyway and
-verified empirically it doesn't help — see the
-"Wave quantisation: tried, rejected" section below.
+Empirical verification: calibrating only on the 127 ops with arithmetic
+intensity above the 295 FLOP/byte ridge point gives F = 943 TFLOPs (the
+realistic ~95 % of vendor for cuBLAS BF16 GEMM), at MAPE 7.8 % on that
+subset. F was *fitable*; the joint fit just had too many unconstrained
+directions.
 
-The actual cause of the lm-head outlier is **shape-dependent compute
-efficiency**: cuBLAS's algorithm choice for this tall-skinny shape
-operates well below the tensor-core roof. Modelling that needs a
-per-shape efficiency factor, not the geometric wave-quant heuristic.
-Out of scope for this sprint; we accept the lm_head as a known outlier.
+**The two-stage fit (`calibrate_two_stage` in `src/autoverse/calibrate.py`)
+splits responsibility:**
+
+1. **Stage 1.** Filter to compute-bound ops only (AI > 295 FLOP/byte).
+   Run `calibrate_per_family` on the subset. Take F.
+2. **Stage 2.** Run `calibrate_per_family` on the full dataset with F
+   bounded tightly around the stage-1 value (effectively frozen). Fit B
+   and per-family overhead from data that actually constrains them.
+
+Result: F = **943 TFLOPs** (0.95× vendor), B = 2286 GB/s, MAPE 10.1 %
+held-out. We pay 0.7 percentage points of MAPE vs the joint
+single-stage fit (9.4 %) for both throughputs ending up
+physically interpretable. Worth it for Tier-3 — *"what if HBM doubled?"*
+needs `B` to mean what it says.
 
 ## Worst-fit ops (Tier 2)
 
 | name | type | measured | predicted | rel err |
 |---|---|---|---|---|
-| `lm_head` (prefill) | MatMul | 0.818 ms | 0.477 ms | 41.8 % |
-| `mlp_down_15` | MatMul | 0.028 ms | 0.018 ms | 37.5 % |
+| `mlp_down_15` | MatMul | 0.028 ms | 0.017 ms | 39.4 % |
+| `mlp_gate_5` | MatMul | 0.026 ms | 0.017 ms | 33.1 % |
 | `residual_mlp_15` | Residual | 0.017 ms | 0.012 ms | 32.7 % |
 | `rmsnorm_pre_mlp_*` | RMSNorm | 0.022 ms | 0.015 ms | ~32 % |
+| `mlp_gate_*` | MatMul | 0.025 ms | 0.017 ms | ~32 % |
 
-The non-LM-head outliers are all in the 0.01–0.03 ms range — small
-enough that a few microseconds of measurement jitter shows up as
-double-digit relative error. The corresponding *absolute* error is
-0.005–0.010 ms, which contributes < 0.5 % of total inference latency
-even when summed across all 16 layers.
+All Tier-2 outliers are now in the 0.01–0.03 ms range — small enough
+that a few microseconds of per-launch variation shows up as double-
+digit relative error. The corresponding *absolute* error is
+0.005–0.010 ms, contributing < 0.5 % of total inference latency even
+when summed across all 16 layers.
+
+(The Tier-1 lm_head outlier — measured 0.818 ms, predicted 0.477 ms,
+1.7× off — is now predicted at 0.595 ms with the lower physical F,
+giving 27 % rel-err. Still imperfect but no longer the worst, and the
+underlying cause — sub-peak cuBLAS efficiency on tall-skinny shapes —
+is documented in "Wave quantisation: tried, rejected" below.)
 
 ## Residual plot
 
@@ -159,22 +180,24 @@ Read the plot:
 - The **diagonal trend** has tightened, especially at the medium-size
   range where most Llama-1B ops sit.
 - The **upper-right outlier** is the LM head — the only point still
-  visibly off the diagonal at the high end, and the named driver of
-  the residual F-above-vendor anomaly.
+  visibly off the diagonal at the high end, and a known cuBLAS
+  shape-efficiency artefact (see "Worst-fit ops" above).
 
 ## Tier-2 refinements: status
 
 We pinned four refinements at the start of Tier 2 in
-`03_autoverse_end_product.md` §8. Status:
+`03_autoverse_end_product.md` §8. Final status:
 
 | refinement | status | impact realised |
 |---|---|---|
 | L2 hit-rate heuristic | **shipped, on by default** | Brings B into physical range. |
 | Per-op-family overhead | **shipped, on by default** | The dominant MAPE win. |
+| Two-stage fit (F on compute-bound; B+O on full) | **shipped, on by default** | Brings F into physical range. |
 | Wave quantisation for GEMMs | **implemented; default off — see below** | Strict regression on this dataset. |
 | Per-op-family α (overlap) | deferred | Lower priority once O is per-family. |
 
-Held-out MAPE target was ≤ 20 %. We landed at 9.4 %.
+Held-out MAPE target was ≤ 20 %. We landed at 10.1 % with both throughputs
+physically interpretable.
 
 ## Wave quantisation: tried, rejected (kept as ablation)
 
@@ -187,13 +210,14 @@ time. We assume `BM = BN = 128` cuBLAS tiles (a common bf16 H100
 choice).
 
 We implemented it in `cost.wave_quant_factor` and wired it through
-`predict_ms` (n_sm parameter) and the calibration. **It strictly
-worsens the fit:**
+`predict_ms` (`n_sm` parameter) and the calibration. **It strictly
+worsens the fit** — comparison against the single-stage joint variant
+(to isolate the wave-quant effect from the two-stage one):
 
 | | F (TFLOPs) | B (GB/s) | MAPE held-out |
 |---|---|---|---|
-| L2 + per-family O (Tier-2 default) | 1172 | 2311 | **9.40 %** |
-| L2 + per-family O **+ wave quant** | 1373 | 2280 | 11.25 % |
+| L2 + per-family O (single-stage) | 1172 | 2311 | **9.40 %** |
+| L2 + per-family O **+ wave quant** (single-stage) | 1373 | 2280 | 11.25 % |
 
 Why the regression — three observations from the data:
 
@@ -233,15 +257,22 @@ uv run python scripts/calibrate.py \
 ## How to reproduce
 
 ```bash
-make validate              # Tier-2 fit (default: per-family + L2)
-# Ablations:
+make validate              # Tier-2 default: two-stage + L2 + per-family overhead
+# Ablations (each isolates one refinement):
 uv run python scripts/calibrate.py \
     measurements/h100_sxm/run_20260426_233235.json \
-    --l2-mb 0              # Tier-1 ablation: no L2
+    --single-stage         # joint F+B+O fit (F drifts to 1172)
 uv run python scripts/calibrate.py \
     measurements/h100_sxm/run_20260426_233235.json \
-    --global-overhead      # Single O ablation
+    --l2-mb 0              # disable L2 heuristic (B inflates above vendor)
+uv run python scripts/calibrate.py \
+    measurements/h100_sxm/run_20260426_233235.json \
+    --global-overhead      # single global O (RoPE/Residual MAPE explodes)
+uv run python scripts/calibrate.py \
+    measurements/h100_sxm/run_20260426_233235.json \
+    --n-sm 132             # add wave quantisation (regresses MAPE)
 ```
 
-The committed `reports/calibration_fit.json` is the Tier-2 fit (both
-refinements active), with `fitted_overhead_by_family` populated.
+The committed `reports/calibration_fit.json` is the Tier-2 default
+(two-stage + L2 + per-family overhead), with
+`fitted_overhead_by_family` populated.

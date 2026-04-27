@@ -5,18 +5,18 @@
 > `reports/calibration_fit.json`. Baseline is the calibrated H100; each
 > experiment changes one parameter and reports the delta.
 
-Baseline calibrated `HardwareSpec`: `F=1172 TFLOPs`, `B=2311 GB/s`, `L2=50 MB`, per-family overhead from Tier-2 fit.
+Baseline calibrated `HardwareSpec`: `F=943 TFLOPs`, `B=2285 GB/s`, `L2=50 MB`, per-family overhead from Tier-2 fit.
 
 ## Headline finding: Llama-1B decode is overhead-bound, not memory-bound
 
-Decoding one token through 227 ops on the calibrated H100 model predicts **4.56 ms**, of which **4.35 ms (95%)** is per-op kernel-launch overhead. Compute + HBM together account for the remaining ~5%. This is the dominant surprise of the what-if work and reframes most of the experiments below: hardware throughput knobs (HBM, compute, L2) move the small non-overhead slice; the big lever for small-model single-stream decode is collapsing the launch count itself (CUDA Graphs, kernel fusion, larger batches).
+Decoding one token through 227 ops on the calibrated H100 model predicts **4.50 ms**, of which **4.29 ms (95%)** is per-op kernel-launch overhead. Compute + HBM together account for the remaining ~5%. This is the dominant surprise of the what-if work and reframes most of the experiments below: hardware throughput knobs (HBM, compute, L2) move the small non-overhead slice; the big lever for small-model single-stream decode is collapsing the launch count itself (CUDA Graphs, kernel fusion, larger batches).
 
 ## E1 — What if HBM bandwidth doubled? (decode, ctx=1024)
 
 | | latency | comment |
 |---|---|---|
-| Baseline (B = 2311 GB/s) | **4.560 ms** | Calibrated H100. |
-| Counterfactual (B × 2) | 4.457 ms | Speedup **1.02 ×** (saves 103 µs/token). |
+| Baseline (B = 2285 GB/s) | **4.502 ms** | Calibrated H100. |
+| Counterfactual (B × 2) | 4.398 ms | Speedup **1.02 ×** (saves 104 µs/token). |
 
 **Reading.** I expected ≈ 2 × — "decode is memory-bound, double the bandwidth, halve the time." The model says otherwise. With 95 % of total time in launch overhead, doubling HBM only acts on the 5 % memory slice. **For Llama-1B decode on H100, an HBM upgrade barely moves the needle.** The roofline still holds — within memory-bound ops the time roughly halves — but those ops are not what you're paying for.
 
@@ -26,8 +26,8 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 
 | | latency | comment |
 |---|---|---|
-| Baseline (F = 1172 TFLOPs) | **6.888 ms** | Calibrated H100. |
-| Counterfactual (F × 2) | 5.841 ms | Speedup **1.18 ×**. |
+| Baseline (F = 943 TFLOPs) | **7.360 ms** | Calibrated H100. |
+| Counterfactual (F × 2) | 5.984 ms | Speedup **1.23 ×**. |
 
 **Reading.** Prefill at seq_len=1024 *is* substantially compute-bound. The 1.18 × falls short of 2 × because ~4.4 ms of the 6.9 ms baseline is the same launch-overhead floor as decode (227 ops, ~14–52 µs each). Halving compute time on the remaining ~2.5 ms gets you the 1.18 × seen. **This is the same story as E1 from the opposite direction**: per-op overhead caps the upside of any single throughput knob.
 
@@ -35,8 +35,8 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 
 | | latency | comment |
 |---|---|---|
-| Baseline (L2 = 50 MB) | **4.560 ms** | Calibrated H100. |
-| Counterfactual (L2 × 2 = 100 MB) | 4.537 ms | Speedup **1.01 ×**. |
+| Baseline (L2 = 50 MB) | **4.502 ms** | Calibrated H100. |
+| Counterfactual (L2 × 2 = 100 MB) | 4.479 ms | Speedup **1.01 ×**. |
 
 **Reading.** Effectively no help. Decode-shape MLP matmuls (`m=1`, `k=2048`, `n=8192`) already fit in 50 MB L2 (working set ~33 MB), so doubling L2 doesn't change their hit-rate. The LM head (`n=128 256`, 525 MB working set) is way too big for any plausible L2; doubling 50→100 shifts hit_rate from 9.5 % to 19 %, saving a few µs. **Llama-1B decode L2 is already "big enough" by a comfortable margin** — the 50 MB H100 L2 was a substantial uplift over A100's 40 MB and pays off here.
 
@@ -44,14 +44,14 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 
 | ctx_len | total ms | attn ms | matmul ms | attn share |
 |---:|---:|---:|---:|---:|
-|     128 | 4.5599 | 0.3620 | 2.1942 |   7.9 % |
-|     512 | 4.5599 | 0.3620 | 2.1942 |   7.9 % |
-|    1024 | 4.5599 | 0.3620 | 2.1942 |   7.9 % |
-|    2048 | 4.5601 | 0.3622 | 2.1942 |   7.9 % |
-|    4096 | 4.5603 | 0.3624 | 2.1942 |   7.9 % |
-|    8192 | 4.5607 | 0.3628 | 2.1942 |   8.0 % |
-|   16384 | 4.5617 | 0.3638 | 2.1942 |   8.0 % |
-|   32768 | 4.6615 | 0.4636 | 2.1942 |   9.9 % |
+|     128 | 4.5014 | 0.3619 | 2.1371 |   8.0 % |
+|     512 | 4.5014 | 0.3620 | 2.1371 |   8.0 % |
+|    1024 | 4.5015 | 0.3620 | 2.1371 |   8.0 % |
+|    2048 | 4.5017 | 0.3622 | 2.1371 |   8.0 % |
+|    4096 | 4.5019 | 0.3625 | 2.1371 |   8.1 % |
+|    8192 | 4.5025 | 0.3630 | 2.1371 |   8.1 % |
+|   16384 | 4.5037 | 0.3642 | 2.1371 |   8.1 % |
+|   32768 | 4.6042 | 0.4647 | 2.1371 |  10.1 % |
 
 **Reading.** Llama-1B's 8 KV heads × 64 d_head = 512 floats per token of KV cache, BF16 = 1024 bytes/token/layer. Even at ctx=32 768 the per-layer KV cache is 32 MB — fits comfortably in L2. Combined with the fact that AttentionDecode has a single-digit-µs roofline contribution (memory-bound but small) plus its 22 µs per-family launch overhead, the attention share stays ≤ 10 % of total decode latency at every context length we tested.
 
@@ -61,11 +61,11 @@ Implication: large-model decode (where weight-read traffic per layer is much lar
 
 | | per-token latency | tokens/sec |
 |---|---:|---:|
-| Prefill (batch all 1024 tokens at once) | **6.7 µs** |  148,659 |
-| Decode (one token at a time) | **4560 µs** |      219 |
-| **Prefill advantage** | **678 ×** faster per token | |
+| Prefill (batch all 1024 tokens at once) | **7.2 µs** |  139,138 |
+| Decode (one token at a time) | **4502 µs** |      222 |
+| **Prefill advantage** | **626 ×** faster per token | |
 
-**Reading.** Decode pays the full 227-op launch overhead *per token*. Prefill pays it once for the whole batch and then amortises across all 1024 tokens — the per-op overhead per token drops by ~1024×. Plus, prefill MatMuls are big enough to actually engage the compute roof instead of bottoming out at the launch floor. Result: a ~678 × per-token latency advantage. **This number is the strongest argument for continuous batching.** Every additional decode step you can convert to a prefill-shaped step (by stacking concurrent users) gets close to that advantage.
+**Reading.** Decode pays the full 227-op launch overhead *per token*. Prefill pays it once for the whole batch and then amortises across all 1024 tokens — the per-op overhead per token drops by ~1024×. Plus, prefill MatMuls are big enough to actually engage the compute roof instead of bottoming out at the launch floor. Result: a ~626 × per-token latency advantage. **This number is the strongest argument for continuous batching.** Every additional decode step you can convert to a prefill-shaped step (by stacking concurrent users) gets close to that advantage.
 
 ## What to take from these five
 

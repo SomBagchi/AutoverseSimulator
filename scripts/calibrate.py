@@ -24,6 +24,7 @@ from pathlib import Path
 from autoverse.calibrate import (
     calibrate,
     calibrate_per_family,
+    calibrate_two_stage,
     load_measurements,
     predict_ms,
 )
@@ -51,6 +52,13 @@ def main() -> int:
     p.add_argument("--global-overhead", action="store_true",
                    help="Use a single global per-op overhead instead of per-family. "
                         "Default is per-family (Tier-2).")
+    p.add_argument("--single-stage", action="store_true",
+                   help="Use the joint single-stage fit (F + B + O all together) "
+                        "instead of the two-stage variant (F from compute-bound; "
+                        "B + O from all with F frozen). Two-stage is the default.")
+    p.add_argument("--ridge-flops-per-byte", type=float, default=295.0,
+                   help="Arithmetic-intensity threshold for stage 1's compute-bound "
+                        "subset (default 295 ≈ H100 vendor ridge point).")
     p.add_argument("--out", type=Path, default=None,
                    help="Write fit + per-op diagnostics here as JSON.")
     args = p.parse_args()
@@ -75,14 +83,23 @@ def main() -> int:
           f" {'(disabled)' if args.n_sm == 0 else '(enabled)'}")
     print(f"  overhead model    : "
           f"{'global' if args.global_overhead else 'per-family (Tier-2)'}")
+    fit_mode = ("global single-stage" if args.global_overhead
+                else "single-stage per-family" if args.single_stage
+                else "two-stage (F on compute-bound; B+O on full)")
+    print(f"  fit mode          : {fit_mode}")
     print()
 
     if args.global_overhead:
         r = calibrate(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
                       l2_mb=args.l2_mb, n_sm=args.n_sm)
-    else:
+    elif args.single_stage:
         r = calibrate_per_family(ops, measured_ms, seed=args.seed, fit_frac=args.fit_frac,
                                   l2_mb=args.l2_mb, n_sm=args.n_sm)
+    else:
+        r = calibrate_two_stage(ops, measured_ms,
+                                 seed=args.seed, fit_frac=args.fit_frac,
+                                 l2_mb=args.l2_mb, n_sm=args.n_sm,
+                                 ridge_flops_per_byte=args.ridge_flops_per_byte)
 
     print("=== Fitted scalars (vs H100-SXM vendor nominal) ===")
     print(f"  peak_bf16_tflops    : {r.fitted_peak_bf16_tflops:8.2f}   "

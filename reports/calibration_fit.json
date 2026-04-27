@@ -11,220 +11,220 @@
     "quick": false
   },
   "fit": {
-    "fitted_peak_bf16_tflops": 1172.297361221861,
-    "fitted_hbm_gbps": 2310.9999825166574,
-    "fitted_per_op_overhead_us": 21.581486677587087,
-    "mape_fit": 0.08388153571500766,
-    "mape_held_out": 0.0940185929680135,
+    "fitted_peak_bf16_tflops": 943.2101270162298,
+    "fitted_hbm_gbps": 2285.4673392581212,
+    "fitted_per_op_overhead_us": 21.323500853938683,
+    "mape_fit": 0.09548529297093743,
+    "mape_held_out": 0.10135614651103202,
     "n_fit": 371,
     "n_held_out": 159,
     "per_op_mape_fit": {
-      "MatMul": 0.09098367346254774,
-      "AttentionDecode": 0.022755590553396564,
-      "AttentionPrefill": 0.12966844421577975,
-      "RMSNorm": 0.08592457988213323,
-      "SiLUGate": 0.12688981374884,
-      "RoPE": 0.025713313699825067,
-      "Embedding": 0.01471216079211036,
-      "Residual": 0.07099120012153051
+      "MatMul": 0.11250967984180191,
+      "AttentionDecode": 0.02274666761232279,
+      "AttentionPrefill": 0.1266386122002676,
+      "RMSNorm": 0.08605900111728115,
+      "SiLUGate": 0.12515861750911603,
+      "RoPE": 0.025769019169940982,
+      "Embedding": 0.0154189739557093,
+      "Residual": 0.07170524257771178
     },
     "per_op_mape_held_out": {
-      "MatMul": 0.10460194699968052,
-      "AttentionPrefill": 0.12989583935731808,
-      "RMSNorm": 0.08375298072695245,
-      "Residual": 0.07855338458536609,
-      "RoPE": 0.010241241892886218,
-      "SiLUGate": 0.12495689367222279,
-      "Embedding": 0.009276533843095378,
-      "AttentionDecode": 0.01652694694830765
+      "MatMul": 0.11667145366272375,
+      "AttentionPrefill": 0.139826390211019,
+      "RMSNorm": 0.08378288328268932,
+      "Residual": 0.07930762758893203,
+      "RoPE": 0.010356021713283734,
+      "SiLUGate": 0.12383607418231374,
+      "Embedding": 0.010044625159283543,
+      "AttentionDecode": 0.016536634109772023
     },
-    "residual_cost": 2.702079627320215,
+    "residual_cost": 3.202172167772705,
     "fitted_overhead_by_family": {
-      "AttentionDecode": 22.620592408681432,
-      "AttentionPrefill": 21.792535147078844,
-      "Embedding": 13.380737238603029,
-      "MatMul": 17.59082021917049,
-      "RMSNorm": 14.641523887407493,
-      "Residual": 11.556182335373359,
-      "RoPE": 52.14389195528904,
-      "SiLUGate": 18.925610229093
+      "AttentionDecode": 22.61863155627408,
+      "AttentionPrefill": 20.33144545470633,
+      "Embedding": 13.372025694461607,
+      "MatMul": 17.06164014224692,
+      "RMSNorm": 14.632454521205053,
+      "Residual": 11.547161855972679,
+      "RoPE": 52.130216969636166,
+      "SiLUGate": 18.89443063700662
     }
   },
   "worst_fit": [
     {
-      "name": "lm_head",
-      "op_type": "MatMul",
-      "measured_ms": 0.8180960118770599,
-      "predicted_ms": 0.4764715373635915,
-      "rel_err": 0.41758481835113304
-    },
-    {
       "name": "mlp_down_15",
       "op_type": "MatMul",
       "measured_ms": 0.028192000463604927,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.3750197670030628
-    },
-    {
-      "name": "residual_mlp_15",
-      "op_type": "Residual",
-      "measured_ms": 0.01716800034046173,
-      "predicted_ms": 0.011557954728290272,
-      "rel_err": 0.3267733865865346
-    },
-    {
-      "name": "rmsnorm_pre_mlp_3",
-      "op_type": "RMSNorm",
-      "measured_ms": 0.021663999184966087,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.3240723397697391
-    },
-    {
-      "name": "rmsnorm_pre_mlp_7",
-      "op_type": "RMSNorm",
-      "measured_ms": 0.02147199958562851,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.31802828973015834
-    },
-    {
-      "name": "rmsnorm_pre_mlp_9",
-      "op_type": "RMSNorm",
-      "measured_ms": 0.021455999463796616,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.31751973125127536
-    },
-    {
-      "name": "rmsnorm_pre_mlp_5",
-      "op_type": "RMSNorm",
-      "measured_ms": 0.02127999998629093,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.3118751743534795
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3935437508275401
     },
     {
       "name": "mlp_gate_5",
       "op_type": "MatMul",
       "measured_ms": 0.025567999109625816,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.3108790819786825
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3313041515482003
     },
     {
-      "name": "rmsnorm_pre_mlp_1",
+      "name": "residual_mlp_15",
+      "op_type": "Residual",
+      "measured_ms": 0.01716800034046173,
+      "predicted_ms": 0.01154895404959962,
+      "rel_err": 0.3272976572361244
+    },
+    {
+      "name": "rmsnorm_pre_mlp_3",
       "op_type": "RMSNorm",
-      "measured_ms": 0.02115200087428093,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.3077110592346167
-    },
-    {
-      "name": "residual_attn_7",
-      "op_type": "Residual",
-      "measured_ms": 0.016671999357640743,
-      "predicted_ms": 0.011557954728290272,
-      "rel_err": 0.3067445313334129
-    },
-    {
-      "name": "residual_attn_1",
-      "op_type": "Residual",
-      "measured_ms": 0.016656000167131424,
-      "predicted_ms": 0.011557954728290272,
-      "rel_err": 0.3060786135738351
+      "measured_ms": 0.021663999184966087,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.3244900634510939
     },
     {
       "name": "mlp_gate_13",
       "op_type": "MatMul",
       "measured_ms": 0.025200000032782555,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.3008157541479157
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.32153909382601537
     },
     {
       "name": "mlp_gate_1",
       "op_type": "MatMul",
       "measured_ms": 0.02518399991095066,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.30037154222144924
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3211080480352218
     },
     {
       "name": "mlp_gate_7",
       "op_type": "MatMul",
       "measured_ms": 0.02518399991095066,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.30037154222144924
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3211080480352218
     },
     {
       "name": "mlp_gate_3",
       "op_type": "MatMul",
       "measured_ms": 0.025119999423623085,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.2985890357217095
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.31937837380092804
+    },
+    {
+      "name": "rmsnorm_pre_mlp_7",
+      "op_type": "RMSNorm",
+      "measured_ms": 0.02147199958562851,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.31844974863790104
+    },
+    {
+      "name": "rmsnorm_pre_mlp_9",
+      "op_type": "RMSNorm",
+      "measured_ms": 0.021455999463796616,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.31794150444844943
     },
     {
       "name": "mlp_gate_11",
       "op_type": "MatMul",
       "measured_ms": 0.02502400055527687,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.2958982325998184
-    },
-    {
-      "name": "rmsnorm_pre_mlp_11",
-      "op_type": "RMSNorm",
-      "measured_ms": 0.020767999812960625,
-      "predicted_ms": 0.014643296280324406,
-      "rel_err": 0.2949106118931103
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.31676732423102655
     },
     {
       "name": "mlp_up_11",
       "op_type": "MatMul",
       "measured_ms": 0.02497600018978119,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.29454504786549124
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.31545424696059465
     },
     {
       "name": "mlp_up_13",
       "op_type": "MatMul",
       "measured_ms": 0.0249439999461174,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.2936400314122001
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.31457605457190035
     },
     {
       "name": "mlp_up_5",
       "op_type": "MatMul",
       "measured_ms": 0.02489599958062172,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.29227814447313843
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3132545330240911
     },
     {
       "name": "mlp_gate_9",
       "op_type": "MatMul",
       "measured_ms": 0.02489599958062172,
-      "predicted_ms": 0.01761944301839357,
-      "rel_err": 0.29227814447313843
+      "predicted_ms": 0.017097214857826094,
+      "rel_err": 0.3132545330240911
+    },
+    {
+      "name": "rmsnorm_pre_mlp_5",
+      "op_type": "RMSNorm",
+      "measured_ms": 0.02127999998629093,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.31230043589005096
+    },
+    {
+      "name": "matmul_2048x4096x1024",
+      "op_type": "MatMul",
+      "measured_ms": 0.026944000273942947,
+      "predicted_ms": 0.03527589451878457,
+      "rel_err": 0.3092300386034085
+    },
+    {
+      "name": "rmsnorm_pre_mlp_1",
+      "op_type": "RMSNorm",
+      "measured_ms": 0.02115200087428093,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.3081388941967178
+    },
+    {
+      "name": "residual_attn_7",
+      "op_type": "Residual",
+      "measured_ms": 0.016671999357640743,
+      "predicted_ms": 0.01154895404959962,
+      "rel_err": 0.3072843993179044
+    },
+    {
+      "name": "residual_attn_1",
+      "op_type": "Residual",
+      "measured_ms": 0.016656000167131424,
+      "predicted_ms": 0.01154895404959962,
+      "rel_err": 0.3066190001372559
+    },
+    {
+      "name": "rmsnorm_pre_mlp_11",
+      "op_type": "RMSNorm",
+      "measured_ms": 0.020767999812960625,
+      "predicted_ms": 0.014634246714831996,
+      "rel_err": 0.2953463575390036
+    },
+    {
+      "name": "matmul_2048x2048x2048",
+      "op_type": "MatMul",
+      "measured_ms": 0.02739199995994568,
+      "predicted_ms": 0.03527589451878457,
+      "rel_err": 0.28781741276165396
     },
     {
       "name": "rope_13",
       "op_type": "RoPE",
       "measured_ms": 0.07635200023651123,
-      "predicted_ms": 0.054412554888938466,
-      "rel_err": 0.2873460456780726
+      "predicted_ms": 0.05442422481212053,
+      "rel_err": 0.28719320196545317
+    },
+    {
+      "name": "q_proj_7",
+      "op_type": "MatMul",
+      "measured_ms": 0.02038400061428547,
+      "predicted_ms": 0.026168767330515746,
+      "rel_err": 0.2837895674010238
     },
     {
       "name": "lm_head",
       "op_type": "MatMul",
       "measured_ms": 0.17455999553203583,
-      "predicted_ms": 0.22233698533368687,
-      "rel_err": 0.2736995361166978
-    },
-    {
-      "name": "attn_prefill_13",
-      "op_type": "AttentionPrefill",
-      "measured_ms": 0.039903998374938965,
-      "predicted_ms": 0.029119971748187364,
-      "rel_err": 0.27024927490785805
-    },
-    {
-      "name": "matmul_4096x256x4096",
-      "op_type": "MatMul",
-      "measured_ms": 0.025439999997615814,
-      "predicted_ms": 0.03211026299452678,
-      "rel_err": 0.26219587254465765
+      "predicted_ms": 0.22409517585385058,
+      "rel_err": 0.28377166355233946
     }
   ]
 }
