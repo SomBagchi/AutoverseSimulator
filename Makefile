@@ -9,13 +9,13 @@ PLOT_OUT     ?= reports/figures/measured_vs_predicted.png
 help:
 	@echo "Autoverse Simulator — commands:"
 	@echo "  install     uv sync + install package"
-	@echo "  test        run pytest"
-	@echo "  lint        ruff check + mypy"
+	@echo "  test        run pytest (73 tests, CPU-only)"
+	@echo "  lint        ruff check + mypy --strict"
 	@echo "  format      ruff format"
-	@echo "  measure     Tier 1: collect H100 measurements (CUDA + --extra measure required)"
-	@echo "  calibrate   Tier 1: fit (F, B, O) on the committed measurement JSON"
-	@echo "  validate    Tier 1: calibrate + regenerate residual plot"
-	@echo "  whatif      Tier 3+: run counterfactual experiments"
+	@echo "  measure     collect a fresh H100 measurement sweep (CUDA + --extra measure)"
+	@echo "  calibrate   Tier 2: fit (F, B, per-family O) on the committed JSON"
+	@echo "  validate    Tier 2: calibrate + regenerate residual plot"
+	@echo "  whatif      Tier 3: regenerate the what-if report from the calibrated fit"
 	@echo "  clean       remove build / cache artifacts"
 
 install:
@@ -49,8 +49,13 @@ validate: calibrate
 	@echo "  scatter plot: $(PLOT_OUT)"
 	@echo "  report      : reports/01_validation.md"
 
-whatif:
-	@echo "TODO: implemented at Tier 3 (Day 4)"
+whatif: $(FIT_OUT)
+	uv run python scripts/whatif.py --fit $(FIT_OUT) --out reports/03_whatif.md
+	@echo ""
+	@echo "Tier-3 artifact: reports/03_whatif.md"
+
+$(FIT_OUT):
+	$(MAKE) calibrate
 
 clean:
 	rm -rf build/ dist/ *.egg-info/ .pytest_cache/ .mypy_cache/ .ruff_cache/

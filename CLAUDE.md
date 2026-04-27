@@ -19,8 +19,13 @@ For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
 - `reports/tier1_explained.md` — pedagogical walkthrough of MAPE, F, B, O, the
   L2-caching artefact, and what the headline numbers mean. Read this *before*
   reading any analysis code.
-- `reports/01_validation.md` — formal Tier-1 validation report (terser).
-- `reports/figures/measured_vs_predicted.png` — one-picture summary.
+- `reports/01_validation.md` — formal Tier-1 validation report.
+- `reports/02_tier2.md` — Tier-2 refinements (L2 + per-family overhead),
+  MAPE drops from 20.2% to 9.4%.
+- `reports/03_whatif.md` — Tier-3 counterfactual experiments. Headline:
+  Llama-1B decode is overhead-bound, not memory-bound — HBM upgrades barely
+  help; the big lever is collapsing the launch count.
+- `reports/figures/measured_vs_predicted.png` — one-picture residual summary.
 
 **2. Data + fit artifacts.**
 - `measurements/h100_sxm/run_20260426_233235.json` — 530 H100 measurements.
@@ -49,11 +54,13 @@ For a fast on-ramp to the codebase, read in this order. Each step is ~5 minutes.
 - `tests/test_measure.py` — CPU smoke tests for the harness.
 
 **5. Reproduce.**
-- `make test` (CPU, ~5s) — full test suite.
+- `make test` (CPU, ~5s) — full test suite (73 tests).
 - `make validate` (CPU, ~3s) — refit + replot from the committed JSON.
+- `make whatif` (CPU, ~2s) — regenerate the Tier-3 what-if report.
 - `make measure` (CUDA, ~10s on H100) — collect a fresh sweep.
 
-If you only read one file: `reports/tier1_explained.md`.
+If you only read one file: `reports/tier1_explained.md`. If you only read two,
+add `reports/03_whatif.md` for the qualitative findings.
 
 ## Planning docs (read these for context beyond this file)
 
